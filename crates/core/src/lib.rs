@@ -1,5 +1,6 @@
 //! Core lockout state machine and LAN server for the quiz buzzer.
 
+pub mod actor;
 pub mod protocol;
 pub mod room;
 
