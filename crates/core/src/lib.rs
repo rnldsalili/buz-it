@@ -1,5 +1,6 @@
 //! Core lockout state machine and LAN server for the quiz buzzer.
 
+pub mod protocol;
 pub mod room;
 
 pub use room::{

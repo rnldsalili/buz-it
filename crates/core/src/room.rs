@@ -26,6 +26,7 @@ pub struct Player {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotPlayer {
     pub id: PlayerId,
     pub name: String,
@@ -33,6 +34,7 @@ pub struct SnapshotPlayer {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotPlace {
     pub player_id: PlayerId,
     pub name: String,
