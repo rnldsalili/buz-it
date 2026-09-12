@@ -4,6 +4,15 @@ use uuid::Uuid;
 
 pub type PlayerId = Uuid;
 
+pub const MAX_PLAYERS: usize = 250;
+pub const MAX_NAME_CHARS: usize = 24;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HelloError {
+    BadName,
+    RoomFull,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
     pub id: PlayerId,
@@ -99,4 +108,43 @@ impl Room {
     pub fn host_key(&self) -> &str {
         &self.host_key
     }
+
+    pub fn hello_player(
+        &mut self,
+        resume: Option<PlayerId>,
+        name: &str,
+    ) -> Result<Player, HelloError> {
+        let name = normalize_name(name)?;
+        if let Some(id) = resume {
+            if let Some(existing) = self.players.get_mut(&id) {
+                existing.name = name.clone();
+                existing.connected = true;
+                return Ok(existing.clone());
+            }
+        }
+        if self.players.len() >= MAX_PLAYERS {
+            return Err(HelloError::RoomFull);
+        }
+        let player = Player {
+            id: Uuid::new_v4(),
+            name,
+            connected: true,
+        };
+        self.players.insert(player.id, player.clone());
+        Ok(player)
+    }
+
+    pub fn disconnect(&mut self, id: PlayerId) {
+        if let Some(p) = self.players.get_mut(&id) {
+            p.connected = false;
+        }
+    }
+}
+
+fn normalize_name(raw: &str) -> Result<String, HelloError> {
+    let name: String = raw.trim().chars().collect();
+    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        return Err(HelloError::BadName);
+    }
+    Ok(name)
 }

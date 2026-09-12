@@ -3,5 +3,6 @@
 pub mod room;
 
 pub use room::{
-    BuzzIgnoreReason, BuzzResult, Player, PlayerId, Room, Snapshot, SnapshotPlace, SnapshotPlayer,
+    BuzzIgnoreReason, BuzzResult, HelloError, Player, PlayerId, Room, Snapshot, SnapshotPlace,
+    SnapshotPlayer, MAX_NAME_CHARS, MAX_PLAYERS,
 };
