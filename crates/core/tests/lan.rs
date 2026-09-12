@@ -1,4 +1,4 @@
-use quiz_buzzer_core::lan::{is_usable_ipv4, lan_base_urls};
+use buz_it_core::lan::{is_usable_ipv4, lan_base_urls};
 use std::net::Ipv4Addr;
 
 #[test]

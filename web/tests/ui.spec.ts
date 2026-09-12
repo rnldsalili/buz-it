@@ -233,7 +233,7 @@ for (const theme of ["light", "dark"]) {
       page,
     }, testInfo) => {
       await page.addInitScript(
-        (theme) => localStorage.setItem("quizBuzzer.theme", theme),
+        (theme) => localStorage.setItem("buzIt.theme", theme),
         theme,
       );
       await page.setViewportSize(size);
@@ -471,8 +471,8 @@ test("rejected refresh resume returns to a usable name form", async ({
   page,
 }) => {
   await page.addInitScript(() => {
-    sessionStorage.setItem("quizBuzzer.playerId", "p1");
-    sessionStorage.setItem("quizBuzzer.playerName", "Alex");
+    sessionStorage.setItem("buzIt.playerId", "p1");
+    sessionStorage.setItem("buzIt.playerName", "Alex");
   });
   const t = await open(page, "/player.html");
   await expect.poll(() => t.sent.length).toBe(1);

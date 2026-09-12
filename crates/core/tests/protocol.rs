@@ -1,4 +1,4 @@
-use quiz_buzzer_core::protocol::{ClientMessage, ClientRole};
+use buz_it_core::protocol::{ClientMessage, ClientRole};
 
 #[test]
 fn parses_player_hello() {
@@ -23,8 +23,8 @@ fn parses_buzz() {
 
 #[test]
 fn snapshot_place_uses_player_id_camel_case() {
-    let place = quiz_buzzer_core::SnapshotPlace {
-        player_id: quiz_buzzer_core::PlayerId::nil(),
+    let place = buz_it_core::SnapshotPlace {
+        player_id: buz_it_core::PlayerId::nil(),
         name: "A".into(),
         place: 1,
     };

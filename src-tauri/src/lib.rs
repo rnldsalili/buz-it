@@ -12,14 +12,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![])
         .setup(|app| {
             let host_key = uuid::Uuid::new_v4().simple().to_string();
-            let port: u16 = std::env::var("QUIZ_BUZZER_PORT")
+            let port: u16 = std::env::var("BUZ_IT_PORT")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(7423);
             let assets = assets::router(app.asset_resolver());
 
             let (listener, router) = tauri::async_runtime::block_on(
-                quiz_buzzer_core::bind_server_with_assets(port, host_key.clone(), assets),
+                buz_it_core::bind_server_with_assets(port, host_key.clone(), assets),
             )?;
             let port = listener.local_addr()?.port();
 

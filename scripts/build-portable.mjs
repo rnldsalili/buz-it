@@ -19,7 +19,7 @@ if (process.platform === "darwin") {
     resolve(output, "Buz-It-macOS-universal.zip")]);
 } else if (process.platform === "win32") {
   run(process.execPath, [cli, "build", "--target", "x86_64-pc-windows-msvc", "--no-bundle"]);
-  copyFileSync(resolve(root, "target/x86_64-pc-windows-msvc/release/quiz-buzzer.exe"),
+  copyFileSync(resolve(root, "target/x86_64-pc-windows-msvc/release/buz-it.exe"),
     resolve(output, "Buz It.exe"));
   run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     "Compress-Archive -LiteralPath 'dist/Buz It.exe' -DestinationPath 'dist/Buz-It-Windows-x64.zip' -Force"]);

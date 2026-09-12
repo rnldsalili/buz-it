@@ -1,7 +1,7 @@
-use quiz_buzzer_core::actor::{Command, RoomHandle};
-use quiz_buzzer_core::handler::{apply_client_message, Conn};
-use quiz_buzzer_core::protocol::{ClientMessage, ClientRole, ServerMessage};
-use quiz_buzzer_core::room::Snapshot;
+use buz_it_core::actor::{Command, RoomHandle};
+use buz_it_core::handler::{apply_client_message, Conn};
+use buz_it_core::protocol::{ClientMessage, ClientRole, ServerMessage};
+use buz_it_core::room::Snapshot;
 use tokio::sync::oneshot;
 
 async fn get_snapshot(handle: &RoomHandle) -> Snapshot {
@@ -19,7 +19,7 @@ async fn player_cannot_arm() {
     let handle = RoomHandle::spawn("secret".into(), vec![]);
     let mut conn = Conn {
         role: Some(ClientRole::Player),
-        player_id: Some(quiz_buzzer_core::PlayerId::nil()),
+        player_id: Some(buz_it_core::PlayerId::nil()),
         host_authorized: false,
         ..Conn::default()
     };

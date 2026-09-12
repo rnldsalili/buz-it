@@ -35,7 +35,7 @@ For both platforms, manually run **Actions → Build portable apps → Run workf
 
 ## Requirements
 
-Phones must reach the laptop on TCP port **7423** (override with `QUIZ_BUZZER_PORT`).
+Phones must reach the laptop on TCP port **7423** (override with `BUZ_IT_PORT`).
 
 - Same Wi‑Fi / SSID as the host
 - **Not** a guest network
@@ -65,10 +65,10 @@ npx tauri dev
 or, after the UI build:
 
 ```bash
-cargo run -p quiz-buzzer-core --bin server
+cargo run -p buz-it-core --bin server
 ```
 
-Default listen port is **7423**. Override with env `QUIZ_BUZZER_PORT`.
+Default listen port is **7423**. Override with env `BUZ_IT_PORT`.
 
 ## How to operate
 
@@ -89,7 +89,7 @@ Ranking is server arrival order on the host process. One running app = one room.
 Automated lockout order (no phones required):
 
 ```bash
-cargo test -p quiz-buzzer-core
+cargo test -p buz-it-core
 ```
 
 After `npm run build:ui`, run `cargo test --workspace --locked` to also verify the desktop app’s embedded page/asset responses, content types, HEAD requests, and 404 behavior.
@@ -134,9 +134,9 @@ Product context is in [PRODUCT.md](PRODUCT.md); the implemented tokens and compo
 
 | Document | Path |
 |---|---|
-| Design (product, protocol, architecture) | [`docs/superpowers/specs/2026-09-13-quiz-buzzer-design.md`](docs/superpowers/specs/2026-09-13-quiz-buzzer-design.md) |
-| Implementation plan (task-by-task) | [`docs/superpowers/plans/2026-09-13-quiz-buzzer.md`](docs/superpowers/plans/2026-09-13-quiz-buzzer.md) |
+| Design (product, protocol, architecture) | [`docs/superpowers/specs/2026-09-13-buz-it-design.md`](docs/superpowers/specs/2026-09-13-buz-it-design.md) |
+| Implementation plan (task-by-task) | [`docs/superpowers/plans/2026-09-13-buz-it.md`](docs/superpowers/plans/2026-09-13-buz-it.md) |
 
 ## Stack
 
-Rust (`quiz-buzzer-core` + Axum WebSocket) + Vite/TypeScript pages, wrapped in **Tauri 2** so the quizmaster can run a window instead of a terminal.
+Rust (`buz-it-core` + Axum WebSocket) + Vite/TypeScript pages, wrapped in **Tauri 2** so the quizmaster can run a window instead of a terminal.

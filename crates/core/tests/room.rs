@@ -1,4 +1,4 @@
-use quiz_buzzer_core::{AuthError, HelloError, MAX_NAME_CHARS, MAX_PLAYERS, PlayerId, Room};
+use buz_it_core::{AuthError, HelloError, MAX_NAME_CHARS, MAX_PLAYERS, PlayerId, Room};
 
 #[test]
 fn new_room_is_idle_and_empty() {
@@ -120,7 +120,7 @@ fn reset_freezes_but_keeps_sequence() {
     assert_eq!(room.reset("nope"), Err(AuthError::BadHostKey));
 }
 
-use quiz_buzzer_core::{BuzzIgnoreReason, BuzzResult};
+use buz_it_core::{BuzzIgnoreReason, BuzzResult};
 
 #[test]
 fn buzz_ignored_when_idle() {

@@ -1,5 +1,5 @@
 {
-  "name": "quiz-buzzer",
+  "name": "buz-it",
   "private": true,
   "scripts": {
     "dev": "tauri dev",

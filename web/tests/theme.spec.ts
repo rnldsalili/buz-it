@@ -77,7 +77,7 @@ test("board controls require authentication and a fresh snapshot; theme changes 
 
 test("saved theme is applied before page modules load", async ({ page }) => {
   await page.addInitScript(() =>
-    localStorage.setItem("quizBuzzer.theme", "dark"),
+    localStorage.setItem("buzIt.theme", "dark"),
   );
   // The game module cannot apply a late theme on our behalf.
   await page.route("**/src/player.ts", (route) => route.abort());

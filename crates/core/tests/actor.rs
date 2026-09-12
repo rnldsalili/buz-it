@@ -1,5 +1,5 @@
-use quiz_buzzer_core::actor::{Command, RoomHandle};
-use quiz_buzzer_core::{BuzzResult, PlayerId};
+use buz_it_core::actor::{Command, RoomHandle};
+use buz_it_core::{BuzzResult, PlayerId};
 use tokio::sync::oneshot;
 
 async fn hello(handle: &RoomHandle, name: &str) -> PlayerId {

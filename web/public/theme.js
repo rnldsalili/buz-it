@@ -1,6 +1,6 @@
 // Classic, blocking head script: apply the preference before styles can paint.
 (() => {
-  const key = "quizBuzzer.theme";
+  const key = "buzIt.theme";
   let theme = "light";
   try {
     if (localStorage.getItem(key) === "dark") theme = "dark";

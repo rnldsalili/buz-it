@@ -6,8 +6,8 @@ const nameInput = element<HTMLInputElement>("name");
 const joinButton = element<HTMLButtonElement>("join-button");
 const buzzer = element<HTMLButtonElement>("buzzer");
 const placeEl = element("place");
-const KEY = "quizBuzzer.playerId";
-const NAME_KEY = "quizBuzzer.playerName";
+const KEY = "buzIt.playerId";
+const NAME_KEY = "buzIt.playerName";
 let playerId: string | null = null;
 let displayName = "";
 try {

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use quiz_buzzer_core::{bind_server, ServerConfig};
+use buz_it_core::{bind_server, ServerConfig};
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -93,7 +93,7 @@ fn sequence(snap: &Value) -> &[Value] {
 #[tokio::test]
 async fn websocket_lockout_order_b_then_a() {
     let static_dir =
-        std::env::temp_dir().join(format!("quiz-buzzer-e2e-static-{}", std::process::id()));
+        std::env::temp_dir().join(format!("buz-it-e2e-static-{}", std::process::id()));
     std::fs::create_dir_all(&static_dir).unwrap();
 
     let (listener, app) = bind_server(ServerConfig {

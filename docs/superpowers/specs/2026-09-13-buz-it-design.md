@@ -1,8 +1,8 @@
-# Quiz Buzzer Design
+# Buz It Design
 
 Local, LAN-only web quiz buzzer. The host runs a Tauri desktop app on a laptop plugged into a TV. Players and a host “clicker” join from phones on the same Wi‑Fi. The board shows who tapped first and the full arrival sequence.
 
-This document is the source of truth for product, architecture, protocol, and UI. The bite-sized engineering plan is `docs/superpowers/plans/2026-09-13-quiz-buzzer.md`.
+This document is the source of truth for product, architecture, protocol, and UI. The bite-sized engineering plan is `docs/superpowers/plans/2026-09-13-buz-it.md`.
 
 ## Goal
 
@@ -47,10 +47,10 @@ Node/Bun would work on the hot path. We still pick Rust + Tauri for distribution
 ## Architecture
 
 ```
-quiz-buzzer.app (Tauri 2)
+buz-it.app (Tauri 2)
 ├─ Webview  →  http://127.0.0.1:<port>/board?k=<host_key>
 └─ Rust process
-   ├─ quiz-buzzer-core
+   ├─ buz-it-core
    │   ├─ Room state machine (single-threaded via one actor)
    │   ├─ JSON WebSocket protocol
    │   └─ Axum HTTP + WS bound to 0.0.0.0:<port>
@@ -66,19 +66,19 @@ One process = one room. All three surfaces speak the **same** WebSocket protocol
 ### Crate layout
 
 ```
-quiz-buzzer/
+buz-it/
   Cargo.toml                  workspace
-  crates/core/                quiz-buzzer-core (logic + HTTP/WS, no Tauri)
+  crates/core/                buz-it-core (logic + HTTP/WS, no Tauri)
   src-tauri/                  Tauri 2 host (starts core, opens board)
   web/                        Vite + TypeScript UI (three pages)
   docs/                       this spec + implementation plan
 ```
 
-`quiz-buzzer-core` is unit-testable without a GUI. Tauri’s only jobs are: pick a port, generate a host key, spawn the server, discover LAN IPv4 addresses, open `/board?k=...`.
+`buz-it-core` is unit-testable without a GUI. Tauri’s only jobs are: pick a port, generate a host key, spawn the server, discover LAN IPv4 addresses, open `/board?k=...`.
 
 ### Bindings and ports
 
-- Default port: `7423` (override with env `QUIZ_BUZZER_PORT`)
+- Default port: `7423` (override with env `BUZ_IT_PORT`)
 - Bind: `0.0.0.0:7423` so phones can connect
 - Board always uses `http://127.0.0.1:7423` (secure context for autoplay)
 - Phones use `http://<lan-ip>:7423` (not a secure context; see Constraints)
@@ -264,7 +264,7 @@ Shared visual language: dark background, high contrast, large type that reads fr
 
 ### Board `/board` (`web/board.html`)
 
-1. If `k` query missing or `hello` fails: “Open this board from the Quiz Buzzer app.”
+1. If `k` query missing or `hello` fails: “Open this board from the Buz It app.”
 2. Top: accepting state (`ARMED` / `LOCKED`) and player count.
 3. Main: if sequence empty and armed, “BUZZ”. If sequence non-empty, **#1 name huge**, then a ranked list.
 4. First time `sequence.length` becomes 1 for this `roundId`, play `web/public/lockout.wav`. Mute button; persist mute in `localStorage`.
@@ -294,13 +294,13 @@ WS URL: `ws://${location.hostname}:${location.port}/ws` so the board uses loopba
 
 ## Tauri 2 host
 
-- Window: 1280×720, resizable, title “Quiz Buzzer”.
+- Window: 1280×720, resizable, title “Buz It”.
 - On setup: generate host key, bind server, `window.navigate(http://127.0.0.1:{port}/board?k={key})`.
 - Capabilities: allow the webview to load `http://127.0.0.1:*` and connect `ws://127.0.0.1:*`. Do not allow arbitrary remote URLs.
 - `beforeDevCommand` / `beforeBuildCommand`: build the Vite app.
 - macOS: if a local-network usage string is required for the chosen OS version, set `NSLocalNetworkUsageDescription` to “Phones on your Wi‑Fi connect to this quiz buzzer.”
 
-Headless (optional, not v1 UI): `quiz-buzzer-core` can expose a `run` binary later. v1 ships only the Tauri app.
+Headless (optional, not v1 UI): `buz-it-core` can expose a `run` binary later. v1 ships only the Tauri app.
 
 ## Testing
 
@@ -348,7 +348,7 @@ Headless (optional, not v1 UI): `quiz-buzzer-core` can expose a `run` binary lat
 
 ## Implementation plan (summary)
 
-Detail lives in `docs/superpowers/plans/2026-09-13-quiz-buzzer.md`. Phases:
+Detail lives in `docs/superpowers/plans/2026-09-13-buz-it.md`. Phases:
 
 1. Workspace + `Room` TDD (protocol-correct lockout).
 2. Actor + Axum `/ws` + static files + LAN IP helper.

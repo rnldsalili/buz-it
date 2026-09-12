@@ -3,7 +3,7 @@ import { connect } from "./ws";
 import { element, onPress, showConnection, showError } from "./ui";
 import type { ServerMessage } from "./protocol";
 
-const MUTE_KEY = "quizBuzzer.mute";
+const MUTE_KEY = "buzIt.mute";
 const OPEN_FROM_APP = "Open this board from the Buz It app.";
 const status = element("status");
 const main = element("main");
