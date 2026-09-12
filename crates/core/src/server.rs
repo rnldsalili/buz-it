@@ -9,7 +9,7 @@ use axum::Router;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, oneshot};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::actor::{Command, RoomHandle};
 use crate::handler::{apply_client_message, Conn};
@@ -27,11 +27,13 @@ pub struct ServerConfig {
 }
 
 pub fn router(handle: RoomHandle, static_dir: PathBuf) -> Router {
+    let player = ServeFile::new(static_dir.join("player.html"));
     let ws = Router::new()
         .route("/ws", get(upgrade_ws))
         .with_state(handle);
     Router::new()
         .merge(ws)
+        .route_service("/", player)
         .fallback_service(ServeDir::new(static_dir))
 }
 
