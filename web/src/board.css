@@ -1,0 +1,117 @@
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #111;
+  color: #f5f5f5;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+}
+
+#status {
+  margin: 0;
+  font-size: 2.4vw;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+#status.armed {
+  color: #7dffa0;
+}
+
+#status.locked {
+  color: #ffb020;
+}
+
+#mute {
+  font-size: 1.2rem;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: #333;
+  color: #fff;
+  cursor: pointer;
+}
+
+#main {
+  margin: 0 1.5rem;
+  font-size: 12vw;
+  font-weight: 800;
+  line-height: 1.05;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+#list {
+  margin: 0 auto 1rem;
+  padding: 0 8vw;
+  max-width: 90vw;
+  max-height: 36vh;
+  overflow: auto;
+  font-size: 4vw;
+  line-height: 1.3;
+}
+
+#list li {
+  overflow-wrap: anywhere;
+}
+
+#qrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 1rem 1.5rem 1.5rem;
+  margin-top: auto;
+}
+
+#qrs .lan {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+#qrs figure {
+  margin: 0;
+  padding: 0.5rem;
+  background: #fff;
+  color: #111;
+  text-align: center;
+}
+
+#qrs figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+
+#qrs canvas {
+  display: block;
+  max-width: 220px;
+  height: auto;
+}
+
+#qrs .clicker canvas {
+  max-width: 160px;
+}
+
+#qrs .clicker figcaption {
+  max-width: 160px;
+  font-weight: 600;
+}

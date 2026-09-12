@@ -28,12 +28,14 @@ pub struct ServerConfig {
 
 pub fn router(handle: RoomHandle, static_dir: PathBuf) -> Router {
     let player = ServeFile::new(static_dir.join("player.html"));
+    let board = ServeFile::new(static_dir.join("board.html"));
     let ws = Router::new()
         .route("/ws", get(upgrade_ws))
         .with_state(handle);
     Router::new()
         .merge(ws)
         .route_service("/", player)
+        .route_service("/board", board)
         .fallback_service(ServeDir::new(static_dir))
 }
 
