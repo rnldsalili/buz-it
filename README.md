@@ -47,6 +47,29 @@ Default listen port is **7423**. Override with env `QUIZ_BUZZER_PORT`.
 
 Ranking is server arrival order on the host process. One running app = one room.
 
+## Verify
+
+Automated lockout order (no phones required):
+
+```bash
+cargo test -p quiz-buzzer-core
+```
+
+Quiz-night two-phone checklist — still do this on real devices before the event. This repo does **not** claim those steps were executed here.
+
+1. Launch Tauri. Board shows URL + QR.
+2. Phone A and B join with names.
+3. Clicker ARM (must use the clicker).
+4. Both tap. Board: first name huge, list ordered, sound once.
+5. Phones show `1st` / `2nd`.
+6. RESET: buzzer says Wait; list remains.
+7. ARM: list clears; phones back to BUZZ.
+8. Toggle mute; first buzz silent then unmuted.
+9. Airplane mode phone A: board `connected: false`; reconnect: same name/id.
+10. Confirm `click` is not required (tap on down).
+
+Same SSID as the host, not guest Wi‑Fi, client isolation off.
+
 ## Docs
 
 | Document | Path |
