@@ -119,3 +119,72 @@ fn reset_freezes_but_keeps_sequence() {
     assert_eq!(snap.sequence.len(), 1);
     assert_eq!(room.reset("nope"), Err(AuthError::BadHostKey));
 }
+
+use quiz_buzzer_core::{BuzzIgnoreReason, BuzzResult};
+
+#[test]
+fn buzz_ignored_when_idle() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    assert_eq!(
+        room.buzz(a.id),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::NotAccepting
+        }
+    );
+    assert!(room.snapshot().sequence.is_empty());
+}
+
+#[test]
+fn first_buzz_wins_and_later_players_append() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    let b = room.hello_player(None, "B").unwrap();
+    let c = room.hello_player(None, "C").unwrap();
+    room.arm("secret").unwrap();
+    assert_eq!(room.buzz(b.id), BuzzResult::Accepted { place: 1, first: true });
+    assert_eq!(room.buzz(a.id), BuzzResult::Accepted { place: 2, first: false });
+    assert_eq!(room.buzz(c.id), BuzzResult::Accepted { place: 3, first: false });
+    let seq: Vec<_> = room.snapshot().sequence.iter().map(|s| s.player_id).collect();
+    assert_eq!(seq, vec![b.id, a.id, c.id]);
+    assert_eq!(room.snapshot().sequence[0].place, 1);
+    assert_eq!(room.snapshot().sequence[0].name, "B");
+}
+
+#[test]
+fn second_buzz_from_same_player_ignored() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    assert_eq!(
+        room.buzz(a.id),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::AlreadyBuzzed
+        }
+    );
+    assert_eq!(room.snapshot().sequence.len(), 1);
+}
+
+#[test]
+fn unknown_player_cannot_buzz() {
+    let mut room = Room::new("secret");
+    room.arm("secret").unwrap();
+    assert_eq!(
+        room.buzz(PlayerId::new_v4()),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::UnknownPlayer
+        }
+    );
+}
+
+#[test]
+fn disconnected_player_still_keeps_place() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.disconnect(a.id);
+    assert_eq!(room.snapshot().sequence[0].player_id, a.id);
+    assert!(!room.snapshot().players.iter().find(|p| p.id == a.id).unwrap().connected);
+}
