@@ -17,3 +17,5 @@ skills-lock.json
 /.impeccable/config.local.json
 
 /dist/
+
+__pycache__/

@@ -1,0 +1,152 @@
+name: Release Buz It
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+        required: true
+      draft_only:
+        description: Stop at a verified draft (for the first release rehearsal)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: buz-it-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.candidate.outputs.version }}
+      commit: ${{ steps.candidate.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore candidate on a rerun
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          artifact_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "release-candidate") | .id')
+          if [ -n "$artifact_id" ]; then
+            gh run download "$GITHUB_RUN_ID" --name release-candidate --dir "$RUNNER_TEMP/candidate"
+          fi
+      - name: Prepare unpublished version commit
+        id: candidate
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: python scripts/release.py prepare --bump "$BUMP" --candidate "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@v4
+        if: steps.candidate.outputs.reused != 'true'
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/candidate/
+          retention-days: 30
+          if-no-files-found: error
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            platform: macOS-universal
+          - os: windows-latest
+            targets: x86_64-pc-windows-msvc
+            platform: Windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/candidate
+      - name: Restore exact release source
+        env:
+          EXPECTED_COMMIT: ${{ needs.prepare.outputs.commit }}
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: python scripts/release.py restore --candidate "$RUNNER_TEMP/candidate" --expected-commit "$EXPECTED_COMMIT" --expected "$EXPECTED_VERSION"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - run: python -m unittest discover -s scripts/tests
+      - run: npm ci
+      - run: npm ci --prefix web
+      - run: npm run build:ui
+      - run: cargo test --workspace --locked
+      - run: npm run typecheck --prefix web
+      - run: npx playwright install chromium
+        working-directory: web
+      - run: npm run test:ui --prefix web
+      - name: Build and verify versioned archive
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/Buz-It-v${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.zip
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+      - name: Push version and publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT: ${{ needs.prepare.outputs.commit }}
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+          DRAFT_ONLY: ${{ inputs.draft_only }}
+        shell: bash
+        run: |
+          args=()
+          if [ "$DRAFT_ONLY" = true ]; then args+=(--draft-only); fi
+          python scripts/release.py publish --candidate "$RUNNER_TEMP/candidate" --assets "$RUNNER_TEMP/release-assets" --expected-commit "$EXPECTED_COMMIT" --expected "$EXPECTED_VERSION" "${args[@]}"

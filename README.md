@@ -6,7 +6,7 @@ This is **not** a cloud app. Nothing is deployed to Cloudflare or the public int
 
 ## Download and launch
 
-Download the archive for your computer from the **Build portable apps** workflow's artifacts in GitHub Actions. Extract the artifact download, then extract the ZIP inside it.
+Download the archive for your computer from [GitHub Releases](https://github.com/rnldsalili/buz-it/releases). Release archives include the version in their name, such as `Buz-It-v0.1.1-macOS-universal.zip` and `Buz-It-v0.1.1-Windows-x64.zip`. If no release has been published yet, use **Build portable apps** in GitHub Actions and extract its artifact download, then the ZIP inside it.
 
 - **macOS (Apple Silicon or Intel):** open `Buz-It-macOS-universal.zip`, then double-click `Buz It.app`. You can move it to Applications or another folder.
 - **Windows x64:** extract `Buz-It-Windows-x64.zip`, then double-click `Buz It.exe`. It needs the [Microsoft WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). If missing, install it once before launching.
@@ -32,6 +32,24 @@ npm run build
 On macOS this creates `dist/Buz-It-macOS-universal.zip` and the app at `target/universal-apple-darwin/release/bundle/macos/Buz It.app`. On Windows it creates `dist/Buz It.exe` and `dist/Buz-It-Windows-x64.zip`. The UI is rebuilt and embedded automatically. Run each build on its native operating system; the Windows executable uses the installed WebView2 runtime.
 
 For both platforms, manually run **Actions → Build portable apps → Run workflow**. It tests and builds on Mac and Windows runners, then uploads the ZIPs as artifacts. It does not publish a release or sign the apps. The workflow must be present on the repository's default branch to appear in Actions.
+
+## Release a new version
+
+Once these changes are on `main`, open **Actions → Release Buz It → Run workflow**, select `main`, and choose:
+
+- **patch** (default): `0.1.0` → `0.1.1` for fixes.
+- **minor**: `0.1.0` → `0.2.0` for features.
+- **major**: `0.1.0` → `1.0.0` for a major release.
+
+The workflow prepares an unpublished version commit, runs Rust/browser tests, and builds the same source on Mac and Windows. Only after both builds pass does it push the version commit and tag, attach both versioned ZIPs plus `SHA256SUMS.txt` to a draft release, generate release notes, and publish it. No personal token is needed; only the publication job receives repository write permission. Branch rules must permit the workflow's version commit on `main`; the workflow does not bypass protection rules.
+
+`Cargo.toml` owns the version. The release script synchronizes Tauri and the workspace entries in `Cargo.lock` without upgrading dependencies. ZIP names and the embedded desktop version are checked against that version. Local builds and **Build portable apps** keep their unversioned filenames and do not change the repository version.
+
+For the first hosted rehearsal, enable **Stop at a verified draft**. It still commits the version and creates its tag, but leaves the completed release unpublished. Review the draft and manually publish it in GitHub Releases when ready. Starting another workflow run selects the *next* version; it does not publish an earlier draft.
+
+If testing or packaging fails, no version or tag is pushed. Use **Re-run failed jobs** to retry with the same candidate. Full reruns also restore and verify the original candidate while its artifact remains available (30 days). If `main` advanced before the final push, start a new run. If attachment upload fails after the atomic push, rerun the failed publication job to finish the same draft. Existing published releases and conflicting tags are never overwritten. An expired candidate artifact requires manual recovery of an already-tagged release; do not delete or move its tag.
+
+Run `python3 -m unittest discover -s scripts/tests` for versioning, local Git publication, candidate integrity, and simulated GitHub failure/retry checks. Python 3.11+ is required for these scripts; the workflows install Python 3.12. A real hosted draft rehearsal is still required before the first public release.
 
 ## Requirements
 
