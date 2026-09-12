@@ -13,6 +13,11 @@ pub enum HelloError {
     RoomFull,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthError {
+    BadHostKey,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
     pub id: PlayerId,
@@ -137,6 +142,52 @@ impl Room {
     pub fn disconnect(&mut self, id: PlayerId) {
         if let Some(p) = self.players.get_mut(&id) {
             p.connected = false;
+        }
+    }
+
+    fn check_host_key(&self, key: &str) -> Result<(), AuthError> {
+        if key == self.host_key {
+            Ok(())
+        } else {
+            Err(AuthError::BadHostKey)
+        }
+    }
+
+    pub fn arm(&mut self, host_key: &str) -> Result<(), AuthError> {
+        self.check_host_key(host_key)?;
+        self.sequence.clear();
+        self.accepting = true;
+        self.round_id += 1;
+        Ok(())
+    }
+
+    pub fn reset(&mut self, host_key: &str) -> Result<(), AuthError> {
+        self.check_host_key(host_key)?;
+        self.accepting = false;
+        Ok(())
+    }
+
+    pub fn buzz(&mut self, player_id: PlayerId) -> BuzzResult {
+        if !self.accepting {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::NotAccepting,
+            };
+        }
+        if !self.players.contains_key(&player_id) {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::UnknownPlayer,
+            };
+        }
+        if self.sequence.contains(&player_id) {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::AlreadyBuzzed,
+            };
+        }
+        self.sequence.push(player_id);
+        let place = self.sequence.len() as u32;
+        BuzzResult::Accepted {
+            place,
+            first: place == 1,
         }
     }
 }

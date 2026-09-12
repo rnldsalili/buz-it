@@ -1,4 +1,4 @@
-use quiz_buzzer_core::{HelloError, MAX_NAME_CHARS, MAX_PLAYERS, PlayerId, Room};
+use quiz_buzzer_core::{AuthError, HelloError, MAX_NAME_CHARS, MAX_PLAYERS, PlayerId, Room};
 
 #[test]
 fn new_room_is_idle_and_empty() {
@@ -83,4 +83,39 @@ fn hello_player_frees_slot_when_disconnected() {
     assert_eq!(resumed.id, ids[1]);
     assert_eq!(resumed.name, "renamed");
     assert!(resumed.connected);
+}
+
+#[test]
+fn arm_requires_host_key() {
+    let mut room = Room::new("secret");
+    assert_eq!(room.arm("nope"), Err(AuthError::BadHostKey));
+    room.arm("secret").unwrap();
+    assert!(room.snapshot().accepting);
+    assert_eq!(room.snapshot().round_id, 1);
+}
+
+#[test]
+fn arm_clears_sequence_and_increments_round() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.arm("secret").unwrap();
+    let snap = room.snapshot();
+    assert!(snap.sequence.is_empty());
+    assert_eq!(snap.round_id, 2);
+    assert!(snap.accepting);
+}
+
+#[test]
+fn reset_freezes_but_keeps_sequence() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.reset("secret").unwrap();
+    let snap = room.snapshot();
+    assert_eq!(snap.accepting, false);
+    assert_eq!(snap.sequence.len(), 1);
+    assert_eq!(room.reset("nope"), Err(AuthError::BadHostKey));
 }
