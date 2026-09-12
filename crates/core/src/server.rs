@@ -26,6 +26,20 @@ pub struct ServerConfig {
     pub static_dir: PathBuf,
 }
 
+pub async fn bind_server(config: ServerConfig) -> std::io::Result<(tokio::net::TcpListener, axum::Router)> {
+    let ips = crate::lan::list_ipv4();
+    let lan_urls = crate::lan::lan_base_urls(config.port, &ips);
+    let handle = crate::actor::RoomHandle::spawn(config.host_key.clone(), lan_urls);
+    let app = router(handle, config.static_dir);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+    Ok((listener, app))
+}
+
+pub async fn start_server(config: ServerConfig) -> std::io::Result<()> {
+    let (listener, app) = bind_server(config).await?;
+    axum::serve(listener, app).await
+}
+
 pub fn router(handle: RoomHandle, static_dir: PathBuf) -> Router {
     let player = ServeFile::new(static_dir.join("player.html"));
     let board = ServeFile::new(static_dir.join("board.html"));
