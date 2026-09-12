@@ -1,0 +1,18 @@
+[package]
+name = "quiz-buzzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "quiz_buzzer_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+axum = "0.8"
+quiz-buzzer-core = { path = "../crates/core" }
+tauri = { version = "2", features = [] }
+uuid = { version = "1", features = ["v4"] }
