@@ -1,74 +1,105 @@
 import { toCanvas } from "qrcode";
 import { connect } from "./ws";
+import { element, onPress, showConnection, showError } from "./ui";
 import type { ServerMessage } from "./protocol";
 
 const MUTE_KEY = "quizBuzzer.mute";
-const OPEN_FROM_APP = "Open this board from the Quiz Buzzer app.";
-
-const status = document.getElementById("status") as HTMLParagraphElement;
-const main = document.getElementById("main") as HTMLElement;
-const list = document.getElementById("list") as HTMLOListElement;
-const qrs = document.getElementById("qrs") as HTMLElement;
-const mute = document.getElementById("mute") as HTMLButtonElement;
-const wifiNote = document.createElement("p");
-wifiNote.id = "wifi-note";
-wifiNote.textContent = "Phones must use the same Wi‑Fi, not Guest.";
-wifiNote.hidden = true;
-wifiNote.style.cssText =
-  "margin:0 1.5rem 0.75rem;text-align:center;font-size:1.1rem;color:#ffb020;";
-main.insertAdjacentElement("afterend", wifiNote);
-
+const OPEN_FROM_APP = "Open this board from the Buz It app.";
+const status = element("status");
+const main = element("main");
+const list = element<HTMLOListElement>("list");
+const qrs = element("qrs");
+const mute = element<HTMLButtonElement>("mute");
+const toggleJoin = element<HTMLButtonElement>("toggle-join");
+const panel = element("join-panel");
+const arm = element<HTMLButtonElement>("arm");
+const reset = element<HTMLButtonElement>("reset");
+let ready = false;
+const spotlight = element("spotlight");
+const waitingMark = element("winner-mark").innerHTML;
 const k = new URLSearchParams(location.search).get("k") ?? "";
 const lockoutAudio = new Audio("/lockout.wav");
 lockoutAudio.preload = "auto";
 lockoutAudio.load();
-
 let lastRoundId: number | null = null;
 let lastSeqLen = 0;
-let lastLanKey = "";
+let lastLanKey: string | null = null;
+let qrVersion = 0;
+let authenticated = false;
 let audioUnlocked = false;
 
-function isMuted(): boolean {
+function isMuted() {
   return localStorage.getItem(MUTE_KEY) === "1";
 }
-
 function renderMute() {
   mute.textContent = isMuted() ? "Unmute" : "Mute";
+  mute.setAttribute("aria-pressed", String(isMuted()));
 }
 
 function renderSnapshot(msg: Extract<ServerMessage, { type: "snapshot" }>) {
   if (lastRoundId !== msg.roundId) {
     lastRoundId = msg.roundId;
     lastSeqLen = 0;
+    spotlight.classList.remove("reveal");
   }
-  if (lastSeqLen === 0 && msg.sequence.length >= 1 && !isMuted()) {
-    lockoutAudio.currentTime = 0;
-    void lockoutAudio.play().catch(() => {});
+  const firstBuzz = lastSeqLen === 0 && msg.sequence.length >= 1;
+  if (firstBuzz) {
+    spotlight.classList.add("reveal");
+    if (!isMuted()) {
+      lockoutAudio.currentTime = 0;
+      void lockoutAudio.play().catch(() => {});
+    }
   }
   lastSeqLen = msg.sequence.length;
-
-  const n = msg.players.filter((p) => p.connected).length;
-  status.textContent = `${msg.accepting ? "ARMED" : "LOCKED"} · ${n} players`;
+  const count = msg.players.filter((p) => p.connected).length;
+  element("player-count").textContent =
+    `${count} ${count === 1 ? "player" : "players"} connected`;
+  status.textContent = msg.accepting ? "Buzzing open" : "Buzzing closed";
   status.classList.toggle("armed", msg.accepting);
   status.classList.toggle("locked", !msg.accepting);
-  wifiNote.hidden = n > 0;
-
-  if (msg.sequence.length > 0) {
+  spotlight.classList.toggle("winner", msg.sequence.length > 0);
+  if (msg.sequence.length) {
     main.textContent = msg.sequence[0].name;
-  } else if (msg.accepting) {
-    main.textContent = "BUZZ";
+    main.classList.toggle("long-name", [...msg.sequence[0].name].length > 16);
+    element("spotlight-label").textContent =
+      "First to buzz. The floor is yours.";
+    element("winner-mark").textContent = "01";
+    element("main-note").textContent = msg.accepting
+      ? "Buzzing is still open for everyone else."
+      : "Buzzing is closed. These results are saved.";
   } else {
-    main.textContent = "";
+    main.classList.remove("long-name");
+    main.textContent = msg.accepting ? "Thumbs ready?" : "Everyone in?";
+    element("spotlight-label").textContent = msg.accepting
+      ? "The round is live. Go for it."
+      : "Find your seat. Bring your best answers.";
+    element("winner-mark").innerHTML = waitingMark;
+    element("main-note").textContent = msg.accepting
+      ? "Know the answer? Hit your buzzer."
+      : "Join on your phone. The host will start the round.";
   }
-
+  element("empty-list").hidden = msg.sequence.length > 0;
+  element("sequence-count").textContent =
+    `${msg.sequence.length} ${msg.sequence.length === 1 ? "buzz" : "buzzes"}`;
   list.replaceChildren(
     ...msg.sequence.map((place) => {
       const li = document.createElement("li");
-      li.textContent = place.name;
+      const rank = document.createElement("span");
+      rank.className = "rank";
+      rank.textContent = String(place.place).padStart(2, "0");
+      const name = document.createElement("span");
+      name.className = "player-name";
+      name.textContent = place.name;
+      li.append(rank, name);
+      if (place.place === 1) {
+        const tag = document.createElement("span");
+        tag.className = "first-tag";
+        tag.textContent = "FIRST";
+        li.append(tag);
+      }
       return li;
     }),
   );
-
   const lanKey = msg.lanUrls.join("\n");
   if (lanKey !== lastLanKey) {
     lastLanKey = lanKey;
@@ -77,32 +108,35 @@ function renderSnapshot(msg: Extract<ServerMessage, { type: "snapshot" }>) {
 }
 
 async function renderQrs(urls: string[]) {
-  qrs.replaceChildren();
+  const version = ++qrVersion;
+  const content = document.createDocumentFragment();
+  if (!urls.length) {
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent =
+      "No LAN address found. Connect the host to Wi-Fi to show join codes.";
+    content.append(note);
+  }
   for (const item of urls) {
     const lan = document.createElement("div");
     lan.className = "lan";
-
     const playerFig = document.createElement("figure");
     const playerCanvas = document.createElement("canvas");
+    playerCanvas.setAttribute("role", "img");
+    playerCanvas.setAttribute("aria-label", `Player join QR code for ${item}`);
     const playerCap = document.createElement("figcaption");
     playerCap.textContent = item;
     playerFig.append(playerCanvas, playerCap);
-    await toCanvas(playerCanvas, item, { width: 220, margin: 1 });
-
-    const clickerFig = document.createElement("figure");
-    clickerFig.className = "clicker";
-    const clickerCanvas = document.createElement("canvas");
-    const clickerCap = document.createElement("figcaption");
-    clickerCap.textContent = "Host clicker";
-    clickerFig.append(clickerCanvas, clickerCap);
-    await toCanvas(clickerCanvas, new URL("host?k=" + k, item).toString(), {
-      width: 160,
-      margin: 1,
-    });
-
-    lan.append(playerFig, clickerFig);
-    qrs.append(lan);
+    try {
+      await toCanvas(playerCanvas, item, { width: 260, margin: 4 });
+      playerCanvas.removeAttribute("style");
+    } catch {
+      playerCap.append(" · QR unavailable. Enter this address on your phone.");
+    }
+    lan.append(playerFig);
+    content.append(lan);
   }
+  if (version === qrVersion) qrs.replaceChildren(content);
 }
 
 renderMute();
@@ -115,22 +149,45 @@ mute.addEventListener("click", () => {
   localStorage.setItem(MUTE_KEY, isMuted() ? "0" : "1");
   renderMute();
 });
+toggleJoin.addEventListener("click", () => {
+  panel.hidden = !panel.hidden;
+  toggleJoin.textContent = panel.hidden ? "Show join codes" : "Hide join codes";
+  toggleJoin.setAttribute("aria-expanded", String(!panel.hidden));
+  element("board-layout").classList.toggle("join-collapsed", panel.hidden);
+});
 
 if (!k) {
-  main.textContent = OPEN_FROM_APP;
+  showError(OPEN_FROM_APP);
+  showConnection("closed");
 } else {
   const sock = connect(
-    (msg: ServerMessage) => {
+    (msg) => {
+      if (msg.type === "helloOk" && msg.role === "board") authenticated = true;
       if (msg.type === "error") {
-        main.textContent = OPEN_FROM_APP;
-        return;
+        showError(msg.message);
+        sock.close();
       }
-      if (msg.type === "snapshot") {
+      if (msg.type === "snapshot" && authenticated) {
+        ready = true;
+        arm.disabled = reset.disabled = false;
+        showConnection("ready");
+        showError("");
         renderSnapshot(msg);
       }
     },
     () => {
       sock.send({ type: "hello", role: "board", hostKey: k });
     },
+    (state) => {
+      authenticated = ready = false;
+      arm.disabled = reset.disabled = true;
+      showConnection(state);
+    },
   );
+  onPress(arm, () => {
+    if (ready) sock.send({ type: "arm" });
+  });
+  onPress(reset, () => {
+    if (ready) sock.send({ type: "reset" });
+  });
 }

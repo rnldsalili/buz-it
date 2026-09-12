@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Phones on your Wi‑Fi connect to this quiz buzzer.</string>
+	<string>Phones on your Wi‑Fi connect to Buz It.</string>
 </dict>
 </plist>

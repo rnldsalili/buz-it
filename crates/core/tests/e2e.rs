@@ -105,17 +105,22 @@ async fn websocket_lockout_order_b_then_a() {
     .expect("bind_server");
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
 
-    let mut clicker = Client::connect(port).await;
+    let mut board = Client::connect(port).await;
     let mut player_a = Client::connect(port).await;
     let mut player_b = Client::connect(port).await;
 
-    clicker
-        .send(json!({"type": "hello", "role": "clicker", "hostKey": HOST_KEY}))
+    board
+        .send(json!({"type": "hello", "role": "board", "hostKey": HOST_KEY}))
         .await;
-    clicker.wait_hello_ok().await;
+    board.wait_hello_ok().await;
 
     player_a
         .send(json!({"type": "hello", "role": "player", "name": "A", "playerId": null}))
@@ -127,15 +132,15 @@ async fn websocket_lockout_order_b_then_a() {
         .await;
     player_b.wait_hello_ok().await;
 
-    clicker.send(json!({"type": "arm"})).await;
-    clicker
+    board.send(json!({"type": "arm"})).await;
+    board
         .wait_snapshot(|s| s.get("accepting") == Some(&Value::Bool(true)))
         .await;
 
     player_b.send(json!({"type": "buzz"})).await;
     player_a.send(json!({"type": "buzz"})).await;
 
-    let locked = clicker.wait_snapshot(|s| sequence(s).len() == 2).await;
+    let locked = board.wait_snapshot(|s| sequence(s).len() == 2).await;
     let seq = sequence(&locked);
     assert_eq!(seq[0]["name"], "B");
     assert_eq!(seq[0]["place"], 1);
@@ -143,8 +148,8 @@ async fn websocket_lockout_order_b_then_a() {
     assert_eq!(seq[1]["name"], "A");
     assert_eq!(seq[1]["place"], 2);
 
-    clicker.send(json!({"type": "reset"})).await;
-    let reset = clicker
+    board.send(json!({"type": "reset"})).await;
+    let reset = board
         .wait_snapshot(|s| {
             s.get("accepting") == Some(&Value::Bool(false)) && sequence(s).len() == 2
         })
@@ -152,8 +157,8 @@ async fn websocket_lockout_order_b_then_a() {
     assert_eq!(reset["accepting"], false);
     assert_eq!(sequence(&reset).len(), 2);
 
-    clicker.send(json!({"type": "arm"})).await;
-    let armed = clicker.wait_snapshot(|s| sequence(s).is_empty()).await;
+    board.send(json!({"type": "arm"})).await;
+    let armed = board.wait_snapshot(|s| sequence(s).is_empty()).await;
     assert!(sequence(&armed).is_empty());
     assert_eq!(armed["accepting"], true);
 

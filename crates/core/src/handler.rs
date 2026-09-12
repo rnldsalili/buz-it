@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use crate::actor::{Command, RoomHandle};
 use crate::protocol::{ClientMessage, ClientRole, ServerMessage};
 use crate::room::{HelloError, PlayerId};
@@ -8,6 +10,7 @@ pub struct Conn {
     pub role: Option<ClientRole>,
     pub player_id: Option<PlayerId>,
     pub host_authorized: bool,
+    pub peer_addr: Option<SocketAddr>,
 }
 
 pub async fn apply_client_message(
@@ -21,12 +24,23 @@ pub async fn apply_client_message(
             name,
             player_id,
             host_key,
-        } => match role {
-            ClientRole::Player => hello_player(conn, name, player_id, handle).await,
-            ClientRole::Board | ClientRole::Clicker => {
-                hello_host(conn, role, host_key, handle).await
+        } => {
+            // A new hello always revokes the old role, including failed handshakes.
+            conn.host_authorized = false;
+            conn.role = None;
+            if let Some(player_id) = conn.player_id.take() {
+                let _ = handle
+                    .sender()
+                    .send(Command::Disconnect {
+                        player_id: Some(player_id),
+                    })
+                    .await;
             }
-        },
+            match role {
+                ClientRole::Player => hello_player(conn, name, player_id, handle).await,
+                ClientRole::Board => hello_host(conn, role, host_key, handle).await,
+            }
+        }
         ClientMessage::Buzz => {
             if conn.role != Some(ClientRole::Player) {
                 return None;
@@ -43,7 +57,10 @@ pub async fn apply_client_message(
             None
         }
         ClientMessage::Arm => {
-            if !conn.host_authorized {
+            if !conn.host_authorized
+                || conn.role != Some(ClientRole::Board)
+                || !conn.peer_addr.is_some_and(|peer| peer.ip().is_loopback())
+            {
                 return None;
             }
             let (reply, rx) = oneshot::channel();
@@ -58,7 +75,10 @@ pub async fn apply_client_message(
             None
         }
         ClientMessage::Reset => {
-            if !conn.host_authorized {
+            if !conn.host_authorized
+                || conn.role != Some(ClientRole::Board)
+                || !conn.peer_addr.is_some_and(|peer| peer.ip().is_loopback())
+            {
                 return None;
             }
             let (reply, rx) = oneshot::channel();
@@ -117,6 +137,12 @@ async fn hello_host(
     host_key: Option<String>,
     handle: &RoomHandle,
 ) -> Option<ServerMessage> {
+    if !conn.peer_addr.is_some_and(|peer| peer.ip().is_loopback()) {
+        return Some(ServerMessage::Error {
+            code: "local_board_only".into(),
+            message: "Open Buz It on the host laptop to control rounds.".into(),
+        });
+    }
     let (reply, rx) = oneshot::channel();
     let _ = handle
         .sender()

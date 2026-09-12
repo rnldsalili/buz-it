@@ -1,6 +1,10 @@
-use std::path::PathBuf;
+mod assets;
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,20 +16,21 @@ pub fn run() {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(7423);
-            let static_dir = resolve_static_dir();
+            let assets = assets::router(app.asset_resolver());
 
             let (listener, router) = tauri::async_runtime::block_on(
-                quiz_buzzer_core::bind_server(quiz_buzzer_core::ServerConfig {
-                    port,
-                    host_key: host_key.clone(),
-                    static_dir,
-                }),
+                quiz_buzzer_core::bind_server_with_assets(port, host_key.clone(), assets),
             )?;
             let port = listener.local_addr()?.port();
 
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = axum::serve(listener, router).await {
-                    eprintln!("quiz buzzer server error: {err}");
+                if let Err(err) = axum::serve(
+                    listener,
+                    router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .await
+                {
+                    eprintln!("Buz It server error: {err}");
                 }
             });
 
@@ -33,25 +38,85 @@ pub fn run() {
                 .parse()
                 .map_err(|e| format!("invalid board URL: {e}"))?;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-                .title("Quiz Buzzer")
+                .title("Buz It")
                 .inner_size(1280.0, 720.0)
                 .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Quiz Buzzer");
+        .run(app_context())
+        .expect("error while running Buz It");
 }
 
-fn resolve_static_dir() -> PathBuf {
-    let from_cwd = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("web/dist");
-    if from_cwd.is_dir() {
-        return from_cwd;
+#[cfg(test)]
+mod packaging_tests {
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn bundled_assets_work_without_a_static_directory() {
+        let app = tauri::test::mock_builder()
+            .build(super::app_context())
+            .unwrap();
+        let router = crate::assets::router(app.asset_resolver());
+        for (path, content_type) in [
+            ("/", "text/html"),
+            ("/board?k=test", "text/html"),
+            ("/theme.js", "text/javascript"),
+            ("/favicon.svg", "image/svg+xml"),
+            ("/lockout.wav", "audio/x-wav"),
+            ("/fonts/barlow-condensed-bold.ttf", "application/font-sfnt"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert!(
+                response.headers()["content-type"]
+                    .to_str()
+                    .unwrap()
+                    .starts_with(content_type),
+                "{path}: {:?}",
+                response.headers()
+            );
+            assert!(!to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty());
+        }
+        for path in [
+            "/missing.js",
+            "/missing",
+            "/host",
+            "/host.html",
+            "/board/",
+            "/../Cargo.toml",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("HEAD")
+                    .uri("/board")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .is_empty());
     }
-    let from_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web/dist");
-    if from_manifest.is_dir() {
-        return from_manifest;
-    }
-    from_cwd
 }

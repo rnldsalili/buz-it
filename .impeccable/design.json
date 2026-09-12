@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-13T00:00:00Z",
+  "title": "Design System: Buz It",
+  "extensions": {
+    "colorMeta": {
+      "vermilion": {
+        "role": "primary",
+        "displayName": "Vermilion"
+      },
+      "ivory": {
+        "role": "neutral",
+        "displayName": "Ivory paper"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Dark ink"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Game-box lettering",
+        "purpose": "Headings, ranks, wordmark, and buzzer label."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "winner-reveal",
+        "value": "360ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "First-place token reveal; disabled with reduced motion."
+      },
+      {
+        "name": "buzzer-press",
+        "value": "100ms ease-out",
+        "purpose": "Immediate press feedback; never delays sending."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "520px"
+      },
+      {
+        "name": "board",
+        "value": "1000px"
+      },
+      {
+        "name": "large-display",
+        "value": "1600px"
+      },
+      {
+        "name": "short-landscape",
+        "value": "550px height"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "description": "Primary button from the implemented tabletop interface.",
+      "html": "<button class=\"ds-primary\">Start round</button>",
+      "css": ".ds-primary{min-height:44px;padding:10px 16px;border:1px solid var(--action);border-radius:12px;background:var(--action);color:var(--on-action);font:700 .85rem \"DM Sans\",sans-serif}.ds-primary:hover{background:var(--text);color:var(--background);border-color:var(--text)}.ds-primary:focus-visible { outline:3px solid var(--accent);outline-offset:4px; }"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "description": "Secondary button from the implemented tabletop interface.",
+      "html": "<button class=\"ds-secondary\">Close buzzing</button>",
+      "css": ".ds-secondary{min-height:44px;padding:10px 16px;border:1px solid var(--line-strong);border-radius:12px;background:transparent;color:var(--text);font:650 .85rem \"DM Sans\",sans-serif}.ds-secondary:hover{background:var(--surface-soft)}.ds-secondary:focus-visible { outline:3px solid var(--accent);outline-offset:4px; }"
+    },
+    {
+      "name": "Name field",
+      "kind": "input",
+      "description": "Name field from the implemented tabletop interface.",
+      "html": "<label for=\"ds-name\">Your name</label><input class=\"ds-name\" id=\"ds-name\" placeholder=\"e.g. Alex\"/>",
+      "css": ".ds-name{display:block;width:100%;min-height:56px;padding:14px 16px;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--text);font:1rem \"DM Sans\",sans-serif;caret-color:var(--accent)}.ds-name::placeholder{color:var(--muted)}.ds-name:focus-visible { outline:3px solid var(--accent);outline-offset:4px; }"
+    },
+    {
+      "name": "Round status",
+      "kind": "chip",
+      "description": "Round status from the implemented tabletop interface.",
+      "html": "<span class=\"ds-status\">Buzzing open</span>",
+      "css": ".ds-status{display:inline-flex;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:var(--background);font:600 .8rem \"DM Sans\",sans-serif}.ds-status:focus-visible { outline:3px solid var(--accent);outline-offset:4px; }"
+    },
+    {
+      "name": "Phone buzzer",
+      "kind": "custom",
+      "description": "Phone buzzer from the implemented tabletop interface.",
+      "html": "<button class=\"ds-buzzer\">BUZZ</button>",
+      "css": ".ds-buzzer{width:280px;aspect-ratio:1;border-radius:50%;border:2px solid var(--action);background:var(--action);color:var(--on-action);font:700 5rem \"Barlow Condensed\",sans-serif;transition:transform 100ms ease-out}.ds-buzzer:active{transform:scale(.97)}.ds-buzzer:disabled{background:var(--surface-soft);color:var(--muted);border:2px dashed var(--line-strong)}@media(prefers-reduced-motion:reduce){.ds-buzzer{transition:none}}.ds-buzzer:focus-visible { outline:3px solid var(--accent);outline-offset:4px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Tabletop Game",
+    "overview": "Warm paper, decisive ink, and a vermilion buzzer make friendly competition feel tangible. Condensed game-box lettering carries personality; simple controls and explicit state messages keep the game easy to operate.",
+    "keyCharacteristics": [
+      "Flat surfaces",
+      "Bold numbered pieces",
+      "Generous touch targets",
+      "Locally bundled fonts"
+    ],
+    "rules": [],
+    "dos": [
+      "Do preserve immediate pointer-down and keyboard activation.",
+      "Do keep every LAN address accessible and full names readable.",
+      "Do use text with color to communicate state.",
+      "Do bundle assets locally for LAN-only operation."
+    ],
+    "donts": [
+      "Don't add decorative gradients, emoji icons, or lightning glyphs.",
+      "Don't hide host controls behind the scrollable result list.",
+      "Don't queue offline taps or imply a connection before a fresh snapshot."
+    ]
+  }
+}

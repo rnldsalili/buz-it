@@ -8,7 +8,6 @@ export default defineConfig({
       input: {
         player: resolve(__dirname, "player.html"),
         board: resolve(__dirname, "board.html"),
-        host: resolve(__dirname, "host.html"),
       },
     },
   },

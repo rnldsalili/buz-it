@@ -10,3 +10,10 @@
 .agents
 .claude
 skills-lock.json
+
+/web/test-results
+/web/playwright-report
+/.impeccable/review/
+/.impeccable/config.local.json
+
+/dist/

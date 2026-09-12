@@ -2,9 +2,10 @@
   "name": "quiz-buzzer",
   "private": true,
   "scripts": {
-    "dev": "npm run build --prefix web && cargo tauri dev",
+    "dev": "tauri dev",
     "build:ui": "npm run build --prefix web",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build": "node scripts/build-portable.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

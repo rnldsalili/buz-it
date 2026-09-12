@@ -1,8 +1,9 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
@@ -26,41 +27,76 @@ pub struct ServerConfig {
     pub static_dir: PathBuf,
 }
 
-pub async fn bind_server(config: ServerConfig) -> std::io::Result<(tokio::net::TcpListener, axum::Router)> {
+pub async fn bind_server(
+    config: ServerConfig,
+) -> std::io::Result<(tokio::net::TcpListener, axum::Router)> {
+    bind_server_with_assets(
+        config.port,
+        config.host_key,
+        static_router(config.static_dir),
+    )
+    .await
+}
+
+/// Bind one room using caller-provided HTTP assets (for example, embedded desktop assets).
+pub async fn bind_server_with_assets(
+    port: u16,
+    host_key: String,
+    assets: Router,
+) -> std::io::Result<(tokio::net::TcpListener, Router)> {
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
     let ips = crate::lan::list_ipv4();
-    let lan_urls = crate::lan::lan_base_urls(config.port, &ips);
-    let handle = crate::actor::RoomHandle::spawn(config.host_key.clone(), lan_urls);
-    let app = router(handle, config.static_dir);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
-    Ok((listener, app))
+    let lan_urls = crate::lan::lan_base_urls(listener.local_addr()?.port(), &ips);
+    let handle = crate::actor::RoomHandle::spawn(host_key, lan_urls);
+    Ok((listener, router_with_assets(handle, assets)))
 }
 
 pub async fn start_server(config: ServerConfig) -> std::io::Result<()> {
     let (listener, app) = bind_server(config).await?;
-    axum::serve(listener, app).await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 pub fn router(handle: RoomHandle, static_dir: PathBuf) -> Router {
-    let player = ServeFile::new(static_dir.join("player.html"));
-    let board = ServeFile::new(static_dir.join("board.html"));
-    let host = ServeFile::new(static_dir.join("host.html"));
-    let ws = Router::new()
-        .route("/ws", get(upgrade_ws))
-        .with_state(handle);
+    router_with_assets(handle, static_router(static_dir))
+}
+
+fn static_router(static_dir: PathBuf) -> Router {
     Router::new()
-        .merge(ws)
-        .route_service("/", player)
-        .route_service("/board", board)
-        .route_service("/host", host)
+        .route_service("/", ServeFile::new(static_dir.join("player.html")))
+        .route_service("/board", ServeFile::new(static_dir.join("board.html")))
         .fallback_service(ServeDir::new(static_dir))
 }
 
-async fn upgrade_ws(ws: WebSocketUpgrade, State(handle): State<RoomHandle>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, handle))
+fn router_with_assets(handle: RoomHandle, assets: Router) -> Router {
+    Router::new()
+        .route("/ws", get(upgrade_ws))
+        .with_state(handle)
+        // Deny retired pages even if supplied by an older asset build.
+        .route("/host", get(|| async { axum::http::StatusCode::NOT_FOUND }))
+        .route(
+            "/host.html",
+            get(|| async { axum::http::StatusCode::NOT_FOUND }),
+        )
+        .merge(assets)
 }
 
-async fn handle_socket(socket: WebSocket, handle: RoomHandle) {
-    let mut conn = Conn::default();
+async fn upgrade_ws(
+    ws: WebSocketUpgrade,
+    State(handle): State<RoomHandle>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, handle, peer_addr))
+}
+
+async fn handle_socket(socket: WebSocket, handle: RoomHandle, peer_addr: SocketAddr) {
+    let mut conn = Conn {
+        peer_addr: Some(peer_addr),
+        ..Conn::default()
+    };
     let mut snap_rx = handle.snapshots.subscribe();
     let (mut sink, mut stream) = socket.split();
 
@@ -101,7 +137,8 @@ async fn handle_socket(socket: WebSocket, handle: RoomHandle) {
                             continue;
                         }
                         let Ok(msg) = serde_json::from_str::<ClientMessage>(text.as_str()) else {
-                            continue;
+                            let _ = sink.send(policy_close()).await;
+                            break;
                         };
                         if conn.role.is_none()
                             && matches!(
@@ -173,10 +210,7 @@ async fn apply_and_reply(
 
 async fn fetch_snapshot(handle: &RoomHandle) -> Option<Snapshot> {
     let (reply, rx) = oneshot::channel();
-    let _ = handle
-        .sender()
-        .send(Command::GetSnapshot { reply })
-        .await;
+    let _ = handle.sender().send(Command::GetSnapshot { reply }).await;
     rx.await.ok()
 }
 
@@ -193,10 +227,7 @@ fn snapshot_message(conn: &Conn, snapshot: Snapshot, handle: &RoomHandle) -> Ser
     ServerMessage::from_snapshot(snapshot, you, handle.lan_urls.clone())
 }
 
-async fn send_msg(
-    sink: &mut SplitSink<WebSocket, Message>,
-    msg: &ServerMessage,
-) -> Result<(), ()> {
+async fn send_msg(sink: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(msg).map_err(|_| ())?;
     sink.send(Message::Text(text.into())).await.map_err(|_| ())
 }

@@ -1,21 +1,138 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>Buzzer</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="/fonts/barlow-condensed-bold.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/src/shared.css" />
+    <title>Buz It · Player</title>
     <link rel="stylesheet" href="/src/player.css" />
   </head>
   <body>
-    <form id="join">
-      <label>Your name <input id="name" maxlength="24" required autocomplete="off" /></label>
-      <button type="submit">Join</button>
-    </form>
-    <button id="buzzer" hidden type="button">Wait</button>
-    <p id="place" hidden></p>
+    <header class="phone-header">
+      <div class="brand" aria-label="Buz It">
+        <svg class="buzzer-icon" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M18 42a14 14 0 0 1 28 0v3H18z" fill="currentColor" />
+          <rect
+            x="12"
+            y="49"
+            width="40"
+            height="8"
+            rx="3"
+            fill="currentColor"
+          />
+          <path
+            d="M32 8v8M12 18l6 6M52 18l-6 6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="5"
+            stroke-linecap="round"
+          /></svg
+        ><span>BUZ IT<span class="brand-period">.</span></span>
+      </div>
+      <button
+        id="theme-toggle"
+        class="quiet-button theme-toggle"
+        type="button"
+        role="switch"
+        aria-label="Dark mode"
+        aria-checked="false"
+      >
+        Light
+      </button>
+    </header>
+    <main class="player-main">
+      <p id="error" class="error" role="alert" hidden></p>
+      <form id="join" class="join-card">
+        <div class="join-symbol" aria-hidden="true">
+          <svg class="buzzer-icon" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M18 42a14 14 0 0 1 28 0v3H18z" fill="currentColor" />
+            <rect
+              x="12"
+              y="49"
+              width="40"
+              height="8"
+              rx="3"
+              fill="currentColor"
+            />
+            <path
+              d="M32 8v8M12 18l6 6M52 18l-6 6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="5"
+              stroke-linecap="round"
+            />
+          </svg>
+        </div>
+        <h1>Good company.<br /><span>Quick thumbs.</span></h1>
+        <p class="intro">
+          You bring the answers.<br />We’ll settle who was first.
+        </p>
+        <label for="name">Your name</label
+        ><input
+          id="name"
+          maxlength="24"
+          required
+          autocomplete="off"
+          placeholder="e.g. Alex"
+          aria-describedby="name-hint"
+        />
+        <p id="name-hint" class="field-hint">
+          This is your name on the big screen.
+        </p>
+        <button id="join-button" type="submit" disabled>Join the game</button>
+        <p class="join-footnote">No account. Just a name and a little nerve.</p>
+      </form>
+      <section id="play" hidden aria-label="Your buzzer">
+        <div class="player-identity">
+          <p id="player-name"></p>
+          <span>Your seat at the table</span>
+        </div>
+        <button id="buzzer" hidden disabled type="button">
+          <svg class="buzzer-icon" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M18 42a14 14 0 0 1 28 0v3H18z" fill="currentColor" />
+            <rect
+              x="12"
+              y="49"
+              width="40"
+              height="8"
+              rx="3"
+              fill="currentColor"
+            />
+            <path
+              d="M32 8v8M12 18l6 6M52 18l-6 6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="5"
+              stroke-linecap="round"
+            /></svg
+          ><span id="buzzer-label">Wait</span
+          ><span id="buzzer-hint">The host will start the round.</span>
+        </button>
+        <div id="place" hidden role="status">
+          <strong id="place-number"></strong><span id="place-note"></span
+          ><span class="place-caption">IN THE BUZZ ORDER</span>
+        </div>
+        <p id="play-note" class="play-note" role="status" aria-atomic="true">
+          Stay ready. Your moment is coming.
+        </p>
+      </section>
+    </main>
+    <footer class="phone-footer">
+      <span id="connection" class="pill" role="status">Connecting…</span
+      ><span>Eyes up. Thumb ready.</span>
+    </footer>
     <script type="module" src="/src/player.ts"></script>
   </body>
 </html>

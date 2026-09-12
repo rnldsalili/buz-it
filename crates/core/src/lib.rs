@@ -12,4 +12,4 @@ pub use room::{
     AuthError, BuzzIgnoreReason, BuzzResult, HelloError, Player, PlayerId, Room, Snapshot,
     SnapshotPlace, SnapshotPlayer, MAX_NAME_CHARS, MAX_PLAYERS,
 };
-pub use server::{bind_server, start_server, ServerConfig};
+pub use server::{bind_server, bind_server_with_assets, start_server, ServerConfig};

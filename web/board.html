@@ -1,19 +1,177 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Quiz Buzzer</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="/fonts/barlow-condensed-bold.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/src/shared.css" />
+    <title>Buz It · Live board</title>
     <link rel="stylesheet" href="/src/board.css" />
   </head>
   <body>
-    <header>
-      <p id="status"></p>
-      <button id="mute" type="button">Mute</button>
+    <header class="topbar">
+      <div class="brand" aria-label="Buz It">
+        <svg class="buzzer-icon" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M18 42a14 14 0 0 1 28 0v3H18z" fill="currentColor" />
+          <rect
+            x="12"
+            y="49"
+            width="40"
+            height="8"
+            rx="3"
+            fill="currentColor"
+          />
+          <path
+            d="M32 8v8M12 18l6 6M52 18l-6 6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="5"
+            stroke-linecap="round"
+          /></svg
+        ><span>BUZ IT<span class="brand-period">.</span></span>
+      </div>
+      <span class="board-label">A little friendly competition.</span
+      ><span id="connection" class="pill" role="status">Connecting…</span>
     </header>
-    <p id="main"></p>
-    <ol id="list"></ol>
-    <div id="qrs"></div>
+    <p id="error" class="error" role="alert" hidden></p>
+    <main class="board-layout" id="board-layout">
+      <section class="arena" aria-label="Round results">
+        <div class="round-bar">
+          <p id="status" class="pill">Waiting for host</p>
+          <p id="player-count" class="muted">0 players connected</p>
+        </div>
+        <section
+          id="spotlight"
+          class="spotlight"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div id="winner-mark" aria-hidden="true">
+            <svg class="buzzer-icon" viewBox="0 0 64 64" aria-hidden="true">
+              <path d="M18 42a14 14 0 0 1 28 0v3H18z" fill="currentColor" />
+              <rect
+                x="12"
+                y="49"
+                width="40"
+                height="8"
+                rx="3"
+                fill="currentColor"
+              />
+              <path
+                d="M32 8v8M12 18l6 6M52 18l-6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </div>
+          <div class="spotlight-copy">
+            <h1 id="main">Everyone in?</h1>
+            <p id="spotlight-label">Find your seat. Bring your best answers.</p>
+            <p id="main-note">
+              Join on your phone. The host will start the round.
+            </p>
+          </div>
+        </section>
+        <section class="sequence-panel" aria-label="Buzz order">
+          <div class="section-heading">
+            <h2>Buzz order</h2>
+            <span id="sequence-count" class="muted">0 buzzes</span>
+          </div>
+          <p id="empty-list" class="empty-list">
+            The quickest thumb takes the first spot.
+          </p>
+          <ol id="list" tabindex="0" aria-label="Full buzz order"></ol>
+        </section>
+        <footer class="arena-footer">
+          <span>First to buzz. First to answer.</span
+          ><span>One room. All together.</span>
+        </footer>
+      </section>
+      <aside id="join-panel" aria-label="Join the game">
+        <div class="join-heading">
+          <h2>Pull up<br />a phone.</h2>
+          <p>Scan to join the game.</p>
+        </div>
+        <div id="qrs"></div>
+        <p id="wifi-note">
+          Use the host’s Wi-Fi, not a Guest network. Keep this page open while
+          you play.
+        </p>
+      </aside>
+    </main>
+    <footer class="host-console" aria-label="Host console">
+      <div class="console-label">
+        You’re the host<span>Let’s get a round going.</span>
+      </div>
+      <div
+        id="controls"
+        class="round-controls"
+        role="group"
+        aria-label="Round controls"
+      >
+        <button
+          id="arm"
+          class="quiet-button primary-button"
+          type="button"
+          disabled
+          aria-describedby="arm-help"
+        >
+          Start round</button
+        ><button
+          id="reset"
+          class="quiet-button"
+          type="button"
+          disabled
+          aria-describedby="reset-help"
+        >
+          Close buzzing</button
+        ><span id="arm-help" class="sr-only"
+          >Clears previous results and opens buzzing.</span
+        ><span id="reset-help" class="sr-only"
+          >Stops new buzzes and keeps results.</span
+        >
+      </div>
+      <div class="toolbar">
+        <button
+          id="theme-toggle"
+          class="quiet-button theme-toggle"
+          type="button"
+          role="switch"
+          aria-label="Dark mode"
+          aria-checked="false"
+        >
+          Light</button
+        ><button
+          id="mute"
+          class="quiet-button"
+          type="button"
+          aria-pressed="false"
+        >
+          Mute</button
+        ><button
+          id="toggle-join"
+          class="quiet-button"
+          type="button"
+          aria-expanded="true"
+          aria-controls="join-panel"
+        >
+          Hide join codes
+        </button>
+      </div>
+    </footer>
     <script type="module" src="/src/board.ts"></script>
   </body>
 </html>

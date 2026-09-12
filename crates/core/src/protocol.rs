@@ -27,7 +27,6 @@ pub enum ClientMessage {
 pub enum ClientRole {
     Player,
     Board,
-    Clicker,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-export type ClientRole = "player" | "board" | "clicker";
+export type ClientRole = "player" | "board";
 
 export type ClientMessage =
   | {

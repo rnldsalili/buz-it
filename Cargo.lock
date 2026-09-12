@@ -2501,6 +2501,8 @@ dependencies = [
  "quiz-buzzer-core",
  "tauri",
  "tauri-build",
+ "tokio",
+ "tower",
  "uuid",
 ]
 

@@ -16,3 +16,8 @@ axum = "0.8"
 quiz-buzzer-core = { path = "../crates/core" }
 tauri = { version = "2", features = [] }
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }

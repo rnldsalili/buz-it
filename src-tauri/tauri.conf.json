@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Quiz Buzzer",
+  "productName": "Buz It",
   "version": "0.1.0",
   "identifier": "dev.quizbuzzer.app",
   "build": {
@@ -20,7 +20,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "Quiz Buzzer",
+        "title": "Buz It",
         "width": 1280,
         "height": 720
       }
@@ -30,14 +30,19 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
     "macOS": {
       "infoPlist": "Info.plist"
-    }
+    },
+    "targets": [
+      "app"
+    ]
   }
 }

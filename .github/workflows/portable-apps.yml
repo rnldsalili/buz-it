@@ -1,0 +1,47 @@
+name: Build portable apps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            artifact: Buz-It-macOS-universal
+          - os: windows-latest
+            targets: x86_64-pc-windows-msvc
+            artifact: Buz-It-Windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - run: npm ci
+      - run: npm ci --prefix web
+      - run: npm run build:ui
+      - run: cargo test --workspace --locked
+      - run: npm run typecheck --prefix web
+      - run: npx playwright install chromium
+        working-directory: web
+      - run: npm run test:ui --prefix web
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+          if-no-files-found: error
