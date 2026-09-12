@@ -10,6 +10,13 @@ const main = document.getElementById("main") as HTMLElement;
 const list = document.getElementById("list") as HTMLOListElement;
 const qrs = document.getElementById("qrs") as HTMLElement;
 const mute = document.getElementById("mute") as HTMLButtonElement;
+const wifiNote = document.createElement("p");
+wifiNote.id = "wifi-note";
+wifiNote.textContent = "Phones must use the same Wi‑Fi, not Guest.";
+wifiNote.hidden = true;
+wifiNote.style.cssText =
+  "margin:0 1.5rem 0.75rem;text-align:center;font-size:1.1rem;color:#ffb020;";
+main.insertAdjacentElement("afterend", wifiNote);
 
 const k = new URLSearchParams(location.search).get("k") ?? "";
 const lockoutAudio = new Audio("/lockout.wav");
@@ -44,6 +51,7 @@ function renderSnapshot(msg: Extract<ServerMessage, { type: "snapshot" }>) {
   status.textContent = `${msg.accepting ? "ARMED" : "LOCKED"} · ${n} players`;
   status.classList.toggle("armed", msg.accepting);
   status.classList.toggle("locked", !msg.accepting);
+  wifiNote.hidden = n > 0;
 
   if (msg.sequence.length > 0) {
     main.textContent = msg.sequence[0].name;
