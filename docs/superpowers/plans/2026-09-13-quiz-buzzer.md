@@ -1,0 +1,1895 @@
+# Quiz Buzzer Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build a LAN-only Tauri quiz buzzer: host laptop shows the board, phones buzz, the server ranks arrival order.
+
+**Architecture:** `quiz-buzzer-core` owns a single-threaded `Room` actor and an Axum HTTP/WebSocket server bound to `0.0.0.0`. The Tauri 2 app starts that server and opens `http://127.0.0.1:<port>/board?k=<host_key>`. Player, board, and clicker are three Vite TypeScript pages talking the same JSON WebSocket protocol.
+
+**Tech Stack:** Rust 2021, Axum, Tokio, uuid, serde_json, Tauri 2, Vite, TypeScript, tower-http, rust-embed is not required in v1 (ServeDir from `web/dist`).
+
+**Spec:** `docs/superpowers/specs/2026-09-13-quiz-buzzer-design.md`
+
+---
+
+## File structure
+
+| Path | Responsibility |
+|---|---|
+| `Cargo.toml` | Workspace |
+| `crates/core/Cargo.toml` | Core package |
+| `crates/core/src/lib.rs` | Module exports + `start_server` |
+| `crates/core/src/room.rs` | Lockout state machine |
+| `crates/core/src/protocol.rs` | JSON messages |
+| `crates/core/src/actor.rs` | mpsc actor + broadcast |
+| `crates/core/src/handler.rs` | Role-aware `apply_client_message` |
+| `crates/core/src/lan.rs` | Private IPv4 list |
+| `crates/core/src/server.rs` | Axum router |
+| `crates/core/tests/room.rs` | State machine tests |
+| `web/` | Vite UI |
+| `src-tauri/` | Tauri host |
+| `README.md` | How to run on a quiz night |
+
+---
+
+### Task 1: Git + workspace skeleton
+
+**Files:**
+- Create: `.gitignore`
+- Create: `Cargo.toml`
+- Create: `crates/core/Cargo.toml`
+- Create: `crates/core/src/lib.rs`
+- Create: `README.md`
+
+- [ ] **Step 1: Initialize git**
+
+```bash
+cd /Users/rnldsalili/Documents/Projects/Personal/quiz-buzzer
+git init
+```
+
+Expected: `Initialized empty Git repository` (or already a repo).
+
+- [ ] **Step 2: Write `.gitignore`**
+
+```
+/target
+/web/node_modules
+/web/dist
+/src-tauri/target
+.DS_Store
+*.log
+```
+
+- [ ] **Step 3: Write workspace `Cargo.toml`**
+
+```toml
+[workspace]
+resolver = "2"
+members = ["crates/core"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+```
+
+- [ ] **Step 4: Write `crates/core/Cargo.toml`**
+
+```toml
+[package]
+name = "quiz-buzzer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+```
+
+- [ ] **Step 5: Write `crates/core/src/lib.rs`**
+
+```rust
+pub mod room;
+
+pub use room::{BuzzIgnoreReason, BuzzResult, Player, PlayerId, Room, Snapshot, SnapshotPlayer, SnapshotPlace};
+```
+
+- [ ] **Step 6: Write a short `README.md`**
+
+```markdown
+# Quiz Buzzer
+
+Local LAN quiz buzzer. The host laptop runs the app; phones on the same Wi‑Fi buzz in.
+
+**Not hosted. Not Cloudflare.** Same Wi‑Fi, not a guest network (turn off AP client isolation).
+
+Design: `docs/superpowers/specs/2026-09-13-quiz-buzzer-design.md`
+Plan: `docs/superpowers/plans/2026-09-13-quiz-buzzer.md`
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add .gitignore Cargo.toml crates/core/Cargo.toml crates/core/src/lib.rs README.md
+git commit -m "chore: initialize workspace for local quiz buzzer"
+```
+
+---
+
+### Task 2: `Room` constructor and snapshot — failing tests first
+
+**Files:**
+- Create: `crates/core/src/room.rs`
+- Create: `crates/core/tests/room.rs`
+- Modify: `crates/core/src/lib.rs` (already exports)
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `crates/core/tests/room.rs`:
+
+```rust
+use quiz_buzzer_core::{Room, BuzzIgnoreReason};
+
+#[test]
+fn new_room_is_idle_and_empty() {
+    let room = Room::new("hostkeyhostkeyhostkeyhostkey12");
+    let snap = room.snapshot();
+    assert_eq!(snap.accepting, false);
+    assert_eq!(snap.round_id, 0);
+    assert!(snap.players.is_empty());
+    assert!(snap.sequence.is_empty());
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test -p quiz-buzzer-core --test room new_room_is_idle_and_empty`
+
+Expected: FAIL compiling (`Room` not found or `new` missing).
+
+- [ ] **Step 3: Write minimal `crates/core/src/room.rs`**
+
+```rust
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use uuid::Uuid;
+
+pub type PlayerId = Uuid;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Player {
+    pub id: PlayerId,
+    pub name: String,
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotPlayer {
+    pub id: PlayerId,
+    pub name: String,
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotPlace {
+    pub player_id: PlayerId,
+    pub name: String,
+    pub place: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub accepting: bool,
+    pub round_id: u64,
+    pub players: Vec<SnapshotPlayer>,
+    pub sequence: Vec<SnapshotPlace>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuzzIgnoreReason {
+    NotAccepting,
+    AlreadyBuzzed,
+    UnknownPlayer,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuzzResult {
+    Ignored { reason: BuzzIgnoreReason },
+    Accepted { place: u32, first: bool },
+}
+
+#[derive(Debug)]
+pub struct Room {
+    pub(crate) host_key: String,
+    accepting: bool,
+    round_id: u64,
+    players: HashMap<PlayerId, Player>,
+    sequence: Vec<PlayerId>,
+}
+
+impl Room {
+    pub fn new(host_key: impl Into<String>) -> Self {
+        Self {
+            host_key: host_key.into(),
+            accepting: false,
+            round_id: 0,
+            players: HashMap::new(),
+            sequence: Vec::new(),
+        }
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        let players = self
+            .players
+            .values()
+            .map(|p| SnapshotPlayer {
+                id: p.id,
+                name: p.name.clone(),
+                connected: p.connected,
+            })
+            .collect();
+        let sequence = self
+            .sequence
+            .iter()
+            .enumerate()
+            .filter_map(|(i, id)| {
+                self.players.get(id).map(|p| SnapshotPlace {
+                    player_id: *id,
+                    name: p.name.clone(),
+                    place: (i as u32) + 1,
+                })
+            })
+            .collect();
+        Snapshot {
+            accepting: self.accepting,
+            round_id: self.round_id,
+            players,
+            sequence,
+        }
+    }
+
+    pub fn host_key(&self) -> &str {
+        &self.host_key
+    }
+}
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `cargo test -p quiz-buzzer-core --test room`
+
+Expected: PASS (`new_room_is_idle_and_empty`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/core/src/room.rs crates/core/tests/room.rs crates/core/src/lib.rs
+git commit -m "feat: add idle Room snapshot"
+```
+
+---
+
+### Task 3: Player hello, name rules, room full
+
+**Files:**
+- Modify: `crates/core/src/room.rs`
+- Modify: `crates/core/tests/room.rs`
+- Modify: `crates/core/src/lib.rs` (export `HelloError`, `MAX_PLAYERS`, `MAX_NAME_CHARS`)
+
+- [ ] **Step 1: Append failing tests to `crates/core/tests/room.rs`**
+
+```rust
+use quiz_buzzer_core::{HelloError, MAX_NAME_CHARS, MAX_PLAYERS};
+
+#[test]
+fn hello_player_assigns_id_and_trims_name() {
+    let mut room = Room::new("k");
+    let ok = room.hello_player(None, "  Asha  ").unwrap();
+    assert_eq!(ok.name, "Asha");
+    assert!(room.snapshot().players.iter().any(|p| p.name == "Asha" && p.connected));
+}
+
+#[test]
+fn hello_player_rejects_empty_and_too_long() {
+    let mut room = Room::new("k");
+    assert_eq!(room.hello_player(None, "   ").unwrap_err(), HelloError::BadName);
+    let long = "a".repeat(MAX_NAME_CHARS + 1);
+    assert_eq!(room.hello_player(None, &long).unwrap_err(), HelloError::BadName);
+}
+
+#[test]
+fn hello_player_reconnects_same_id() {
+    let mut room = Room::new("k");
+    let first = room.hello_player(None, "Asha").unwrap();
+    room.disconnect(first.id);
+    assert!(!room.snapshot().players.iter().find(|p| p.id == first.id).unwrap().connected);
+    let again = room.hello_player(Some(first.id), "Asha 2").unwrap();
+    assert_eq!(again.id, first.id);
+    let p = room.snapshot().players.into_iter().find(|p| p.id == first.id).unwrap();
+    assert!(p.connected);
+    assert_eq!(p.name, "Asha 2");
+}
+
+#[test]
+fn hello_player_unknown_id_mints_new() {
+    let mut room = Room::new("k");
+    let ghost = uuid::Uuid::nil();
+    let ok = room.hello_player(Some(ghost), "Bea").unwrap();
+    assert_ne!(ok.id, ghost);
+}
+
+#[test]
+fn hello_player_room_full() {
+    let mut room = Room::new("k");
+    for i in 0..MAX_PLAYERS {
+        room.hello_player(None, &format!("p{i}")).unwrap();
+    }
+    assert_eq!(room.hello_player(None, "overflow").unwrap_err(), HelloError::RoomFull);
+}
+
+#[test]
+fn duplicate_names_allowed() {
+    let mut room = Room::new("k");
+    room.hello_player(None, "Asha").unwrap();
+    room.hello_player(None, "Asha").unwrap();
+    assert_eq!(room.snapshot().players.len(), 2);
+}
+```
+
+- [ ] **Step 2: Run tests — expect FAIL**
+
+Run: `cargo test -p quiz-buzzer-core --test room`
+
+Expected: FAIL (`hello_player` missing).
+
+- [ ] **Step 3: Implement hello / disconnect on `Room`**
+
+Add to `crates/core/src/room.rs`:
+
+```rust
+pub const MAX_PLAYERS: usize = 250;
+pub const MAX_NAME_CHARS: usize = 24;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HelloError {
+    BadName,
+    RoomFull,
+}
+
+fn normalize_name(raw: &str) -> Result<String, HelloError> {
+    let name: String = raw.trim().chars().collect();
+    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        return Err(HelloError::BadName);
+    }
+    Ok(name)
+}
+
+impl Room {
+    pub fn hello_player(
+        &mut self,
+        resume: Option<PlayerId>,
+        name: &str,
+    ) -> Result<Player, HelloError> {
+        let name = normalize_name(name)?;
+        if let Some(id) = resume {
+            if let Some(existing) = self.players.get_mut(&id) {
+                existing.name = name.clone();
+                existing.connected = true;
+                return Ok(existing.clone());
+            }
+        }
+        if self.players.len() >= MAX_PLAYERS {
+            return Err(HelloError::RoomFull);
+        }
+        let player = Player {
+            id: Uuid::new_v4(),
+            name,
+            connected: true,
+        };
+        self.players.insert(player.id, player.clone());
+        Ok(player)
+    }
+
+    pub fn disconnect(&mut self, id: PlayerId) {
+        if let Some(p) = self.players.get_mut(&id) {
+            p.connected = false;
+        }
+    }
+}
+```
+
+Export `HelloError`, `MAX_PLAYERS`, `MAX_NAME_CHARS` from `lib.rs`.
+
+Add `uuid` to the test crate by using `uuid::Uuid` — add to `crates/core/Cargo.toml`:
+
+```toml
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+
+Run: `cargo test -p quiz-buzzer-core --test room`
+
+Expected: all PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: player hello, reconnect, and name limits"
+```
+
+---
+
+### Task 4: Arm, reset, host key
+
+**Files:**
+- Modify: `crates/core/src/room.rs`
+- Modify: `crates/core/tests/room.rs`
+- Modify: `crates/core/src/lib.rs` (export `AuthError`)
+
+- [ ] **Step 1: Append failing tests**
+
+```rust
+use quiz_buzzer_core::AuthError;
+
+#[test]
+fn arm_requires_host_key() {
+    let mut room = Room::new("secret");
+    assert_eq!(room.arm("nope"), Err(AuthError::BadHostKey));
+    room.arm("secret").unwrap();
+    assert!(room.snapshot().accepting);
+    assert_eq!(room.snapshot().round_id, 1);
+}
+
+#[test]
+fn arm_clears_sequence_and_increments_round() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.arm("secret").unwrap();
+    let snap = room.snapshot();
+    assert!(snap.sequence.is_empty());
+    assert_eq!(snap.round_id, 2);
+    assert!(snap.accepting);
+}
+
+#[test]
+fn reset_freezes_but_keeps_sequence() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.reset("secret").unwrap();
+    let snap = room.snapshot();
+    assert_eq!(snap.accepting, false);
+    assert_eq!(snap.sequence.len(), 1);
+    assert_eq!(room.reset("nope"), Err(AuthError::BadHostKey));
+}
+```
+
+- [ ] **Step 2: Run — expect FAIL** (`arm` missing).
+
+- [ ] **Step 3: Implement**
+
+```rust
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthError {
+    BadHostKey,
+}
+
+impl Room {
+    fn check_host_key(&self, key: &str) -> Result<(), AuthError> {
+        if key == self.host_key {
+            Ok(())
+        } else {
+            Err(AuthError::BadHostKey)
+        }
+    }
+
+    pub fn arm(&mut self, host_key: &str) -> Result<(), AuthError> {
+        self.check_host_key(host_key)?;
+        self.sequence.clear();
+        self.accepting = true;
+        self.round_id += 1;
+        Ok(())
+    }
+
+    pub fn reset(&mut self, host_key: &str) -> Result<(), AuthError> {
+        self.check_host_key(host_key)?;
+        self.accepting = false;
+        Ok(())
+    }
+}
+```
+
+Note: tests call `room.buzz` before Task 5. **In this task only**, add a stub so arm tests compile:
+
+```rust
+impl Room {
+    pub fn buzz(&mut self, player_id: PlayerId) -> BuzzResult {
+        if !self.accepting {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::NotAccepting,
+            };
+        }
+        if !self.players.contains_key(&player_id) {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::UnknownPlayer,
+            };
+        }
+        if self.sequence.contains(&player_id) {
+            return BuzzResult::Ignored {
+                reason: BuzzIgnoreReason::AlreadyBuzzed,
+            };
+        }
+        self.sequence.push(player_id);
+        let place = self.sequence.len() as u32;
+        BuzzResult::Accepted {
+            place,
+            first: place == 1,
+        }
+    }
+}
+```
+
+Putting the full `buzz` body here means Task 5 tests lock behavior rather than inventing the method. If you prefer strict TDD isolation, add only `self.sequence.push(player_id); BuzzResult::Accepted { place: 1, first: true }` in this task and expand in Task 5 — the body above is the full v1 behavior and is what Task 5 will assert.
+
+- [ ] **Step 4: Run — expect PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: arm, reset, and host-key auth"
+```
+
+---
+
+### Task 5: Buzz lockout and sequence (the product)
+
+**Files:**
+- Modify: `crates/core/src/room.rs` (buzz already present if Task 4 included the full body)
+- Modify: `crates/core/tests/room.rs`
+
+- [ ] **Step 1: Append failing tests**
+
+```rust
+use quiz_buzzer_core::BuzzResult;
+
+#[test]
+fn buzz_ignored_when_idle() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    assert_eq!(
+        room.buzz(a.id),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::NotAccepting
+        }
+    );
+    assert!(room.snapshot().sequence.is_empty());
+}
+
+#[test]
+fn first_buzz_wins_and_later_players_append() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    let b = room.hello_player(None, "B").unwrap();
+    let c = room.hello_player(None, "C").unwrap();
+    room.arm("secret").unwrap();
+    assert_eq!(room.buzz(b.id), BuzzResult::Accepted { place: 1, first: true });
+    assert_eq!(room.buzz(a.id), BuzzResult::Accepted { place: 2, first: false });
+    assert_eq!(room.buzz(c.id), BuzzResult::Accepted { place: 3, first: false });
+    let seq: Vec<_> = room.snapshot().sequence.iter().map(|s| s.player_id).collect();
+    assert_eq!(seq, vec![b.id, a.id, c.id]);
+    assert_eq!(room.snapshot().sequence[0].place, 1);
+    assert_eq!(room.snapshot().sequence[0].name, "B");
+}
+
+#[test]
+fn second_buzz_from_same_player_ignored() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    assert_eq!(
+        room.buzz(a.id),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::AlreadyBuzzed
+        }
+    );
+    assert_eq!(room.snapshot().sequence.len(), 1);
+}
+
+#[test]
+fn unknown_player_cannot_buzz() {
+    let mut room = Room::new("secret");
+    room.arm("secret").unwrap();
+    assert_eq!(
+        room.buzz(uuid::Uuid::new_v4()),
+        BuzzResult::Ignored {
+            reason: BuzzIgnoreReason::UnknownPlayer
+        }
+    );
+}
+
+#[test]
+fn disconnected_player_still_keeps_place() {
+    let mut room = Room::new("secret");
+    let a = room.hello_player(None, "A").unwrap();
+    room.arm("secret").unwrap();
+    room.buzz(a.id);
+    room.disconnect(a.id);
+    assert_eq!(room.snapshot().sequence[0].player_id, a.id);
+    assert!(!room.snapshot().players.iter().find(|p| p.id == a.id).unwrap().connected);
+}
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cargo test -p quiz-buzzer-core --test room`
+
+If Task 4 shipped the full `buzz` body, these PASS immediately. If they fail, replace `buzz` with the implementation in Task 4 Step 3.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/core
+git commit -m "test: lockout sequence is server arrival order"
+```
+
+---
+
+### Task 6: JSON protocol types
+
+**Files:**
+- Create: `crates/core/src/protocol.rs`
+- Modify: `crates/core/src/lib.rs`
+- Create: `crates/core/tests/protocol.rs`
+
+- [ ] **Step 1: Write `crates/core/src/protocol.rs`**
+
+Use `rename_all = "camelCase"` so the browser sees `roundId`, `hostKey`, `playerId`.
+
+```rust
+use crate::room::{PlayerId, Snapshot};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ClientMessage {
+    #[serde(rename = "hello")]
+    Hello {
+        role: ClientRole,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        player_id: Option<PlayerId>,
+        #[serde(default)]
+        host_key: Option<String>,
+    },
+    #[serde(rename = "buzz")]
+    Buzz,
+    #[serde(rename = "arm")]
+    Arm,
+    #[serde(rename = "reset")]
+    Reset,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ClientRole {
+    Player,
+    Board,
+    Clicker,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ServerMessage {
+    #[serde(rename = "helloOk")]
+    HelloOk {
+        player_id: Option<PlayerId>,
+        role: ClientRole,
+    },
+    #[serde(rename = "error")]
+    Error { code: String, message: String },
+    #[serde(rename = "snapshot")]
+    Snapshot {
+        accepting: bool,
+        round_id: u64,
+        players: Vec<crate::room::SnapshotPlayer>,
+        sequence: Vec<crate::room::SnapshotPlace>,
+        lan_urls: Vec<String>,
+        you: You,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct You {
+    pub id: Option<PlayerId>,
+    pub role: ClientRole,
+    pub place: Option<u32>,
+}
+
+impl ServerMessage {
+    pub fn from_snapshot(snapshot: Snapshot, you: You, lan_urls: Vec<String>) -> Self {
+        ServerMessage::Snapshot {
+            accepting: snapshot.accepting,
+            round_id: snapshot.round_id,
+            players: snapshot.players,
+            sequence: snapshot.sequence,
+            lan_urls,
+            you,
+        }
+    }
+}
+```
+
+Add `#[serde(rename_all = "camelCase")]` to `SnapshotPlayer` and `SnapshotPlace` in `room.rs` so JSON keys are `playerId` not `player_id`.
+
+- [ ] **Step 2: Test serde tags**
+
+`crates/core/tests/protocol.rs`:
+
+```rust
+use quiz_buzzer_core::protocol::{ClientMessage, ClientRole};
+
+#[test]
+fn parses_player_hello() {
+    let msg: ClientMessage = serde_json::from_str(
+        r#"{"type":"hello","role":"player","name":"Asha","playerId":null}"#,
+    )
+    .unwrap();
+    match msg {
+        ClientMessage::Hello { role, name, .. } => {
+            assert_eq!(role, ClientRole::Player);
+            assert_eq!(name.as_deref(), Some("Asha"));
+        }
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn parses_buzz() {
+    let msg: ClientMessage = serde_json::from_str(r#"{"type":"buzz"}"#).unwrap();
+    assert!(matches!(msg, ClientMessage::Buzz));
+}
+```
+
+Export `pub mod protocol;` from `lib.rs`.
+
+- [ ] **Step 3: `cargo test -p quiz-buzzer-core` — expect PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: JSON protocol with camelCase tags"
+```
+
+---
+
+### Task 7: Room actor (serialized commands)
+
+**Files:**
+- Create: `crates/core/src/actor.rs`
+- Modify: `crates/core/src/lib.rs`
+- Modify: `crates/core/Cargo.toml` (add `tokio`)
+- Create: `crates/core/tests/actor.rs`
+
+- [ ] **Step 1: Add tokio**
+
+```toml
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+```
+
+For tests: `tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }` in `[dev-dependencies]` as well, or enable `rt-multi-thread` on the main dep.
+
+- [ ] **Step 2: Write `crates/core/src/actor.rs`**
+
+The actor broadcasts `Snapshot` (room state). Each WebSocket fills per-connection `you` when it serializes `ServerMessage` (Task 9).
+
+```rust
+use crate::protocol::ClientRole;
+use crate::room::{AuthError, BuzzResult, HelloError, PlayerId, Room, Snapshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+#[derive(Debug)]
+pub enum Command {
+    HelloPlayer {
+        resume: Option<PlayerId>,
+        name: String,
+        reply: oneshot::Sender<Result<PlayerId, HelloError>>,
+    },
+    HelloHost {
+        role: ClientRole,
+        host_key: String,
+        reply: oneshot::Sender<Result<(), AuthError>>,
+    },
+    Buzz {
+        player_id: PlayerId,
+        reply: oneshot::Sender<BuzzResult>,
+    },
+    Arm {
+        host_key: String,
+        reply: oneshot::Sender<Result<(), AuthError>>,
+    },
+    Reset {
+        host_key: String,
+        reply: oneshot::Sender<Result<(), AuthError>>,
+    },
+    Disconnect {
+        player_id: Option<PlayerId>,
+    },
+    GetSnapshot {
+        reply: oneshot::Sender<Snapshot>,
+    },
+}
+
+#[derive(Clone)]
+pub struct RoomHandle {
+    tx: mpsc::Sender<Command>,
+    pub snapshots: broadcast::Sender<Snapshot>,
+    pub host_key: String,
+    pub lan_urls: Vec<String>,
+}
+
+impl RoomHandle {
+    pub fn spawn(host_key: String, lan_urls: Vec<String>) -> Self {
+        let (tx, mut rx) = mpsc::channel::<Command>(1024);
+        let (snap_tx, _) = broadcast::channel(64);
+        let key_clone = host_key.clone();
+        let broadcasts = snap_tx.clone();
+        tokio::spawn(async move {
+            let mut room = Room::new(key_clone);
+            while let Some(cmd) = rx.recv().await {
+                let mut changed = true;
+                match cmd {
+                    Command::HelloPlayer { resume, name, reply } => {
+                        let r = room.hello_player(resume, &name).map(|p| p.id);
+                        let _ = reply.send(r);
+                    }
+                    Command::HelloHost { host_key, reply, .. } => {
+                        let r = if host_key == room.host_key() {
+                            Ok(())
+                        } else {
+                            Err(AuthError::BadHostKey)
+                        };
+                        let _ = reply.send(r);
+                    }
+                    Command::Buzz { player_id, reply } => {
+                        let r = room.buzz(player_id);
+                        changed = matches!(r, BuzzResult::Accepted { .. });
+                        let _ = reply.send(r);
+                    }
+                    Command::Arm { host_key, reply } => {
+                        let r = room.arm(&host_key);
+                        let _ = reply.send(r);
+                    }
+                    Command::Reset { host_key, reply } => {
+                        let r = room.reset(&host_key);
+                        let _ = reply.send(r);
+                    }
+                    Command::Disconnect { player_id } => {
+                        if let Some(id) = player_id {
+                            room.disconnect(id);
+                        }
+                    }
+                    Command::GetSnapshot { reply } => {
+                        changed = false;
+                        let _ = reply.send(room.snapshot());
+                    }
+                }
+                if changed {
+                    let _ = broadcasts.send(room.snapshot());
+                }
+            }
+        });
+        Self {
+            tx,
+            snapshots: snap_tx,
+            host_key,
+            lan_urls,
+        }
+    }
+
+    pub fn sender(&self) -> mpsc::Sender<Command> {
+        self.tx.clone()
+    }
+}
+```
+
+- [ ] **Step 3: Actor order test `crates/core/tests/actor.rs`**
+
+```rust
+use quiz_buzzer_core::actor::{Command, RoomHandle};
+use quiz_buzzer_core::{BuzzResult, PlayerId};
+use tokio::sync::oneshot;
+
+async fn hello(handle: &RoomHandle, name: &str) -> PlayerId {
+    let (reply, rx) = oneshot::channel();
+    handle
+        .sender()
+        .send(Command::HelloPlayer {
+            resume: None,
+            name: name.into(),
+            reply,
+        })
+        .await
+        .unwrap();
+    rx.await.unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn buzz_order_matches_enqueue_order() {
+    let handle = RoomHandle::spawn("secret".into(), vec![]);
+    let a = hello(&handle, "A").await;
+    let b = hello(&handle, "B").await;
+    let (reply, rx) = oneshot::channel();
+    handle
+        .sender()
+        .send(Command::Arm {
+            host_key: "secret".into(),
+            reply,
+        })
+        .await
+        .unwrap();
+    rx.await.unwrap().unwrap();
+
+    let (ra, rxa) = oneshot::channel();
+    let (rb, rxb) = oneshot::channel();
+    let tx = handle.sender();
+    tx.send(Command::Buzz {
+        player_id: b,
+        reply: rb,
+    })
+    .await
+    .unwrap();
+    tx.send(Command::Buzz {
+        player_id: a,
+        reply: ra,
+    })
+    .await
+    .unwrap();
+    assert_eq!(rxb.await.unwrap(), BuzzResult::Accepted { place: 1, first: true });
+    assert_eq!(rxa.await.unwrap(), BuzzResult::Accepted { place: 2, first: false });
+}
+```
+
+- [ ] **Step 4: `cargo test -p quiz-buzzer-core` — expect PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: single-threaded room actor for buzz ordering"
+```
+
+---
+
+### Task 8: LAN IPv4 helper
+
+**Files:**
+- Create: `crates/core/src/lan.rs`
+- Create: `crates/core/tests/lan.rs`
+- Modify: `crates/core/Cargo.toml` (add nothing if using `std::net`)
+- Modify: `crates/core/src/lib.rs`
+
+- [ ] **Step 1: Write tests for classification**
+
+```rust
+use quiz_buzzer_core::lan::{is_usable_ipv4, lan_base_urls};
+use std::net::Ipv4Addr;
+
+#[test]
+fn rejects_loopback_and_link_local() {
+    assert!(!is_usable_ipv4(Ipv4Addr::new(127, 0, 0, 1)));
+    assert!(!is_usable_ipv4(Ipv4Addr::new(169, 254, 1, 1)));
+    assert!(is_usable_ipv4(Ipv4Addr::new(192, 168, 1, 20)));
+    assert!(is_usable_ipv4(Ipv4Addr::new(10, 0, 0, 2)));
+    assert!(is_usable_ipv4(Ipv4Addr::new(172, 16, 5, 1)));
+}
+
+#[test]
+fn urls_include_port_and_slash() {
+    let urls = lan_base_urls(7423, &[Ipv4Addr::new(192, 168, 1, 20)]);
+    assert_eq!(urls, vec!["http://192.168.1.20:7423/"]);
+}
+```
+
+- [ ] **Step 2: Implement `crates/core/src/lan.rs`**
+
+```rust
+use std::net::{IpAddr, Ipv4Addr};
+
+pub fn is_usable_ipv4(ip: Ipv4Addr) -> bool {
+    !ip.is_loopback() && !ip.is_link_local() && !ip.is_unspecified() && !ip.is_multicast()
+}
+
+pub fn list_ipv4() -> Vec<Ipv4Addr> {
+    let mut out = Vec::new();
+    let Ok(ifaces) = local_ip_address::list_afinet_netifas() else {
+        return out;
+    };
+    for (_, addr) in ifaces {
+        if let IpAddr::V4(v4) = addr {
+            if is_usable_ipv4(v4) {
+                out.push(v4);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn lan_base_urls(port: u16, ips: &[Ipv4Addr]) -> Vec<String> {
+    ips.iter()
+        .map(|ip| format!("http://{ip}:{port}/"))
+        .collect()
+}
+```
+
+Add dependency `local-ip-address = "0.6"`.
+
+If that crate’s API differs, use `if_addrs` instead:
+
+```toml
+if-addrs = "0.13"
+```
+
+```rust
+for iface in if_addrs::get_if_addrs().unwrap_or_default() {
+    if let if_addrs::IfAddr::V4(v4) = iface.addr {
+        if is_usable_ipv4(v4.ip) {
+            out.push(v4.ip);
+        }
+    }
+}
+```
+
+Prefer `if-addrs` — small, common.
+
+- [ ] **Step 3: `cargo test -p quiz-buzzer-core --test lan` — PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: list private LAN IPv4 addresses"
+```
+
+---
+
+### Task 9: Axum server and WebSocket
+
+**Files:**
+- Create: `crates/core/src/server.rs`
+- Modify: `crates/core/src/lib.rs`
+- Modify: `crates/core/Cargo.toml`
+- Create: `crates/core/tests/ws.rs`
+
+- [ ] **Step 1: Dependencies**
+
+```toml
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tracing = "0.1"
+http = "1"
+```
+
+- [ ] **Step 2: Write `start_server` and WS handler**
+
+`crates/core/src/lib.rs`:
+
+```rust
+pub mod actor;
+pub mod lan;
+pub mod protocol;
+pub mod room;
+pub mod server;
+
+pub use room::*;
+pub use server::{ServerConfig, start_server};
+```
+
+`crates/core/src/server.rs` — implement:
+
+- `ServerConfig { port: u16, host_key: String, static_dir: PathBuf }`
+- `list_ipv4()` + `lan_base_urls` stored on `RoomHandle`
+- Router:
+  - `GET /ws` → WebSocket upgrade
+  - `GET /board` `GET /host` `GET /` → files from `static_dir` (`board.html`, `host.html`, `player.html` / `index.html`)
+  - `fallback` ServeDir for `/assets` and `/lockout.wav`
+- On connect: 5s timeout waiting for first `hello`
+- Map `ClientMessage` to `Command`
+- Subscribe to snapshot broadcast; on each snap, send `ServerMessage::from_snapshot` with `You { id, role, place }` computed from that connection’s player id
+- On buzz accepted or any command that changes state, actor already broadcasts
+- Clicker `arm`/`reset` use `handle.host_key` from the hello, not a second copy from the client after hello — still send the key on each arm message as the spec says (`{"type":"arm"}` has no key). **Store host_key on the socket after successful HelloHost and pass it into Arm/Reset.** Players’ Arm messages ignored (no stored host key).
+
+Connection struct:
+
+```rust
+struct Conn {
+    role: Option<ClientRole>,
+    player_id: Option<PlayerId>,
+    host_authorized: bool,
+}
+```
+
+Hello board/clicker: `Command::HelloHost`. Hello player: `Command::HelloPlayer`.
+
+After hello, send `helloOk` then current snapshot. To get a snapshot without waiting for a change, add `Command::GetSnapshot { reply: oneshot::Sender<Snapshot> }` to the actor.
+
+Add that command in this task (modify `actor.rs`).
+
+- [ ] **Step 3: Integration test**
+
+`crates/core/tests/ws.rs` using `axum::body` / `tokio_tungstenite` can be heavy. Prefer calling the actor the same way the handler will:
+
+Skip raw TCP if it slows the plan: add `Command::GetSnapshot` tests in `actor.rs` instead, and a unit test that `ClientMessage` from a player cannot arm because the handler checks `host_authorized` — extract `fn handle_message(conn, msg, handle) -> ...` and test that.
+
+Create `crates/core/src/handler.rs`:
+
+```rust
+pub async fn apply_client_message(
+    conn: &mut Conn,
+    msg: ClientMessage,
+    handle: &RoomHandle,
+) -> Option<ServerMessage>
+```
+
+Test: player `Arm` returns `None` and does not flip `accepting` (read snapshot).
+
+This is the handler TDD. Implement `apply_client_message` fully here; `server.rs` only does I/O.
+
+`Conn` and `apply_client_message` live in `handler.rs`. Tests in `crates/core/tests/handler.rs`:
+
+```rust
+#[tokio::test]
+async fn player_cannot_arm() {
+    let handle = RoomHandle::spawn("secret".into(), vec![]);
+    let mut conn = Conn { role: Some(ClientRole::Player), player_id: Some(uuid::Uuid::nil()), host_authorized: false };
+    apply_client_message(&mut conn, ClientMessage::Arm, &handle).await;
+    let snap = get_snapshot(&handle).await;
+    assert!(!snap.accepting);
+}
+
+#[tokio::test]
+async fn clicker_arm_then_player_buzz() {
+    let handle = RoomHandle::spawn("secret".into(), vec![]);
+    let mut host = Conn { role: Some(ClientRole::Clicker), player_id: None, host_authorized: true };
+    apply_client_message(&mut host, ClientMessage::Arm, &handle).await;
+    let mut player_conn = Conn::default();
+    let id = match apply_client_message(
+        &mut player_conn,
+        ClientMessage::Hello { role: ClientRole::Player, name: Some("A".into()), player_id: None, host_key: None },
+        &handle,
+    ).await {
+        Some(ServerMessage::HelloOk { player_id, .. }) => player_id.unwrap(),
+        other => panic!("{other:?}"),
+    };
+    player_conn.player_id = Some(id);
+    player_conn.role = Some(ClientRole::Player);
+    apply_client_message(&mut player_conn, ClientMessage::Buzz, &handle).await;
+    let snap = get_snapshot(&handle).await;
+    assert_eq!(snap.sequence[0].place, 1);
+}
+```
+
+Implement `apply_client_message` so these pass. Wire it from the WS loop.
+
+- [ ] **Step 4: `cargo test -p quiz-buzzer-core` — PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/core
+git commit -m "feat: websocket handler enforces roles and lockout"
+```
+
+---
+
+### Task 10: Vite + TypeScript protocol mirror
+
+**Files:**
+- Create: `web/package.json`
+- Create: `web/tsconfig.json`
+- Create: `web/vite.config.ts`
+- Create: `web/src/protocol.ts`
+- Create: `web/src/ws.ts`
+
+- [ ] **Step 1: `web/package.json`**
+
+```json
+{
+  "name": "quiz-buzzer-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "build:watch": "vite build --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
+```
+
+`web/tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src"]
+}
+```
+
+`web/vite.config.ts`:
+
+```ts
+import { defineConfig } from "vite";
+import { resolve } from "node:path";
+
+export default defineConfig({
+  build: {
+    outDir: "dist",
+    rollupOptions: {
+      input: {
+        player: resolve(__dirname, "player.html"),
+        board: resolve(__dirname, "board.html"),
+        host: resolve(__dirname, "host.html"),
+      },
+    },
+  },
+});
+```
+
+- [ ] **Step 2: `web/src/protocol.ts`**
+
+```ts
+export type ClientRole = "player" | "board" | "clicker";
+
+export type ClientMessage =
+  | {
+      type: "hello";
+      role: ClientRole;
+      name?: string;
+      playerId?: string | null;
+      hostKey?: string;
+    }
+  | { type: "buzz" }
+  | { type: "arm" }
+  | { type: "reset" };
+
+export type SnapshotPlace = {
+  playerId: string;
+  name: string;
+  place: number;
+};
+
+export type SnapshotPlayer = {
+  id: string;
+  name: string;
+  connected: boolean;
+};
+
+export type ServerMessage =
+  | { type: "helloOk"; playerId?: string | null; role: ClientRole }
+  | { type: "error"; code: string; message: string }
+  | {
+      type: "snapshot";
+      accepting: boolean;
+      roundId: number;
+      players: SnapshotPlayer[];
+      sequence: SnapshotPlace[];
+      lanUrls: string[];
+      you: { id?: string | null; role: ClientRole; place?: number | null };
+    };
+```
+
+Field names **must** match `serde rename_all = "camelCase"` from Task 6 (`roundId`, `lanUrls`, `playerId`, `hostKey`).
+
+- [ ] **Step 3: `web/src/ws.ts`**
+
+```ts
+import type { ClientMessage, ServerMessage } from "./protocol";
+
+export function connect(onMessage: (msg: ServerMessage) => void): {
+  send: (msg: ClientMessage) => void;
+  close: () => void;
+} {
+  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+  let ws = new WebSocket(url);
+  let closed = false;
+
+  const bind = () => {
+    ws.addEventListener("message", (ev) => {
+      const msg = JSON.parse(String(ev.data)) as ServerMessage;
+      onMessage(msg);
+    });
+    ws.addEventListener("close", () => {
+      if (closed) return;
+      setTimeout(() => {
+        if (closed) return;
+        ws = new WebSocket(url);
+        bind();
+      }, 400);
+    });
+  };
+  bind();
+
+  return {
+    send(msg) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      }
+    },
+    close() {
+      closed = true;
+      ws.close();
+    },
+  };
+}
+```
+
+Re-hello after reconnect must be done by each page (player resends `playerId` from sessionStorage). Add `onOpen` callback:
+
+```ts
+export function connect(
+  onMessage: (msg: ServerMessage) => void,
+  onOpen: () => void,
+): { send: (msg: ClientMessage) => void; close: () => void }
+```
+
+Call `onOpen` on `ws.addEventListener("open", onOpen)` including after reconnect so pages re-send hello.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add web
+git commit -m "feat: web protocol types and reconnecting websocket"
+```
+
+---
+
+### Task 11: Player page
+
+**Files:**
+- Create: `web/player.html`
+- Create: `web/src/player.ts`
+- Create: `web/src/player.css`
+
+- [ ] **Step 1: `web/player.html`**
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>Buzzer</title>
+    <link rel="stylesheet" href="/src/player.css" />
+  </head>
+  <body>
+    <form id="join">
+      <label>Your name <input id="name" maxlength="24" required autocomplete="off" /></label>
+      <button type="submit">Join</button>
+    </form>
+    <button id="buzzer" hidden type="button">Wait</button>
+    <p id="place" hidden></p>
+    <script type="module" src="/src/player.ts"></script>
+  </body>
+</html>
+```
+
+- [ ] **Step 2: `web/src/player.css`**
+
+```css
+html, body { margin: 0; height: 100%; background: #111; color: #f5f5f5; font-family: system-ui, sans-serif; }
+#join { padding: 2rem; display: flex; flex-direction: column; gap: 1rem; }
+input, button { font-size: 1.5rem; padding: 0.75rem; }
+#buzzer, #place {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  font-size: 12vw; border: 0; color: #fff;
+  user-select: none; touch-action: manipulation; -webkit-user-select: none;
+}
+#buzzer { background: #c1121f; }
+#buzzer:disabled { background: #333; }
+#place { background: #111; display: grid; place-items: center; }
+```
+
+- [ ] **Step 3: `web/src/player.ts`**
+
+```ts
+import { connect } from "./ws";
+import type { ServerMessage } from "./protocol";
+
+const joinForm = document.getElementById("join") as HTMLFormElement;
+const nameInput = document.getElementById("name") as HTMLInputElement;
+const buzzer = document.getElementById("buzzer") as HTMLButtonElement;
+const placeEl = document.getElementById("place") as HTMLParagraphElement;
+
+const KEY = "quizBuzzer.playerId";
+let playerId = sessionStorage.getItem(KEY);
+let joined = false;
+
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function showBuzzer(accepting: boolean, place: number | null | undefined) {
+  joinForm.hidden = true;
+  if (place) {
+    buzzer.hidden = true;
+    placeEl.hidden = false;
+    placeEl.textContent = ordinal(place);
+    return;
+  }
+  placeEl.hidden = true;
+  buzzer.hidden = false;
+  buzzer.disabled = !accepting;
+  buzzer.textContent = accepting ? "BUZZ" : "Wait";
+}
+
+const sock = connect(
+  (msg: ServerMessage) => {
+    if (msg.type === "helloOk" && msg.playerId) {
+      playerId = msg.playerId;
+      sessionStorage.setItem(KEY, playerId);
+      joined = true;
+    }
+    if (msg.type === "error") {
+      alert(msg.message);
+    }
+    if (msg.type === "snapshot" && joined) {
+      showBuzzer(msg.accepting, msg.you.place ?? null);
+    }
+  },
+  () => {
+    if (!joined) return;
+    sock.send({
+      type: "hello",
+      role: "player",
+      name: nameInput.value,
+      playerId,
+    });
+  },
+);
+
+joinForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  sock.send({
+    type: "hello",
+    role: "player",
+    name: nameInput.value,
+    playerId,
+  });
+});
+
+function buzz(ev: Event) {
+  ev.preventDefault();
+  if (buzzer.disabled) return;
+  sock.send({ type: "buzz" });
+}
+buzzer.addEventListener("pointerdown", buzz);
+buzzer.addEventListener("keydown", (e) => {
+  if (e.code === "Space" || e.code === "Enter") buzz(e);
+});
+```
+
+- [ ] **Step 4: Point Axum `/` at `player.html`**
+
+In `server.rs`, serve `static_dir.join("player.html")` for `/`. After `npm run build`, Vite emits `web/dist/player.html`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add web crates/core/src/server.rs
+git commit -m "feat: player join and pointerdown buzzer"
+```
+
+---
+
+### Task 12: Board page (sequence, QR, sound)
+
+**Files:**
+- Create: `web/board.html`
+- Create: `web/src/board.ts`
+- Create: `web/src/board.css`
+- Create: `web/public/lockout.wav` — generate a short sine beep so the repo is not missing audio:
+
+```bash
+# from repo root, 0.25s 440Hz wav via ffmpeg if present; otherwise commit a tiny PCM wav
+python3 - <<'PY'
+import wave, math, struct, pathlib
+path = pathlib.Path("web/public/lockout.wav")
+path.parent.mkdir(parents=True, exist_ok=True)
+fr, dur, f = 22050, 0.25, 440
+n = int(fr * dur)
+with wave.open(str(path), "w") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(fr)
+    for i in range(n):
+        val = int(32767 * 0.4 * math.sin(2 * math.pi * f * i / fr) * (1 - i / n))
+        w.writeframes(struct.pack("<h", val))
+PY
+```
+
+- [ ] **Step 1: Board HTML** — root nodes: `#status`, `#main`, `#list`, `#qrs`, `#mute`.
+
+- [ ] **Step 2: `board.ts` behavior**
+
+- Read `k` from `URLSearchParams`.
+- Hello `{ type:"hello", role:"board", hostKey: k }`.
+- On snapshot: set status to `ARMED` / `LOCKED`; render `#1` name from `sequence[0]`; fill ranked list.
+- Track `lastRoundId` + `lastSeqLen`. If `roundId` changed, reset. If `sequence.length` went from 0 to ≥1 and not muted, `lockoutAudio.play()`.
+- Mute toggles `localStorage quizBuzzer.mute`.
+- For each `lanUrls` item, draw QR into a canvas via `qrcode.toCanvas` for player URL (the item itself) and clicker URL (`new URL("host?k="+k, item).toString()`).
+
+Install types: `npm i -D @types/qrcode` in `web/`.
+
+- [ ] **Step 3: Board CSS** — dark, `#main` font-size `12vw` for first name, list `4vw`, footer QRs max 220px.
+
+- [ ] **Step 4: Axum `GET /board` serves `board.html`**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add web crates/core/src/server.rs
+git commit -m "feat: board sequence, QR, and first-buzz sound"
+```
+
+---
+
+### Task 13: Clicker page
+
+**Files:**
+- Create: `web/host.html`
+- Create: `web/src/host.ts`
+- Create: `web/src/host.css`
+
+- [ ] **Step 1: Two buttons `#arm` `#reset`, `#status`**
+
+- [ ] **Step 2: `host.ts`**
+
+```ts
+const k = new URLSearchParams(location.search).get("k") ?? "";
+const sock = connect(
+  (msg) => {
+    if (msg.type === "snapshot") {
+      const first = msg.sequence[0]?.name ?? "—";
+      status.textContent = `${msg.accepting ? "ARMED" : "LOCKED"} · ${msg.players.filter(p => p.connected).length} players · #1 ${first}`;
+    }
+    if (msg.type === "error") alert(msg.message);
+  },
+  () => sock.send({ type: "hello", role: "clicker", hostKey: k }),
+);
+document.getElementById("arm")!.addEventListener("click", () => sock.send({ type: "arm" }));
+document.getElementById("reset")!.addEventListener("click", () => sock.send({ type: "reset" }));
+```
+
+Use `pointerdown` on ARM as well so the host’s tap is immediate.
+
+- [ ] **Step 3: Axum `GET /host` serves `host.html`**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add web crates/core/src/server.rs
+git commit -m "feat: host clicker arm and reset"
+```
+
+---
+
+### Task 14: Serve `web/dist` from Axum + smoke the server
+
+**Files:**
+- Modify: `crates/core/src/server.rs`
+- Modify: `crates/core/src/lib.rs`
+- Create: `crates/core/src/bin/server.rs` (dev binary, no Tauri yet)
+
+- [ ] **Step 1: `start_server` signature**
+
+```rust
+pub struct ServerConfig {
+    pub port: u16,
+    pub host_key: String,
+    pub static_dir: std::path::PathBuf,
+}
+
+pub async fn start_server(config: ServerConfig) -> std::io::Result<()> {
+    let ips = crate::lan::list_ipv4();
+    let lan_urls = crate::lan::lan_base_urls(config.port, &ips);
+    let handle = crate::actor::RoomHandle::spawn(config.host_key.clone(), lan_urls);
+    let app = crate::server::router(handle, config.static_dir);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+    axum::serve(listener, app).await
+}
+```
+
+Need `tokio` feature `net` `rt-multi-thread`.
+
+- [ ] **Step 2: Dev binary `crates/core/src/bin/server.rs`**
+
+```rust
+#[tokio::main]
+async fn main() {
+    let port: u16 = std::env::var("QUIZ_BUZZER_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(7423);
+    let key = hex_key();
+    eprintln!("host key {key}");
+    quiz_buzzer_core::start_server(quiz_buzzer_core::ServerConfig {
+        port,
+        host_key: key,
+        static_dir: std::path::PathBuf::from("web/dist"),
+    })
+    .await
+    .unwrap();
+}
+
+fn hex_key() -> String {
+    use std::fmt::Write;
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).unwrap();
+    let mut s = String::new();
+    for x in b { write!(&mut s, "{x:02x}").unwrap(); }
+    s
+}
+```
+
+Add `getrandom = "0.3"` (or `0.2` with `getrandom::getrandom`). Check crate API and use the function that exists.
+
+- [ ] **Step 3: Build UI and run**
+
+```bash
+cd web && npm install && npm run build && cd ..
+cargo run -p quiz-buzzer-core --bin server
+```
+
+Expected: process listens on `0.0.0.0:7423`. `curl -I http://127.0.0.1:7423/` returns 200 HTML.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/core web/package-lock.json
+git commit -m "feat: axum serves UI and websocket on port 7423"
+```
+
+---
+
+### Task 15: Tauri 2 host app
+
+**Files:**
+- Create: `src-tauri/Cargo.toml`
+- Create: `src-tauri/src/lib.rs`
+- Create: `src-tauri/src/main.rs`
+- Create: `src-tauri/tauri.conf.json`
+- Create: `src-tauri/capabilities/default.json`
+- Create: `src-tauri/build.rs`
+- Modify: `Cargo.toml` workspace members
+- Create: `package.json` at repo root for `tauri` CLI
+
+- [ ] **Step 1: Add workspace member `src-tauri`**
+
+Root `package.json`:
+
+```json
+{
+  "name": "quiz-buzzer",
+  "private": true,
+  "scripts": {
+    "dev": "npm run build --prefix web && cargo tauri dev",
+    "build:ui": "npm run build --prefix web",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
+```
+
+- [ ] **Step 2: `src-tauri/tauri.conf.json`**
+
+```json
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Quiz Buzzer",
+  "version": "0.1.0",
+  "identifier": "dev.quizbuzzer.app",
+  "build": {
+    "beforeDevCommand": "npm run build --prefix web",
+    "beforeBuildCommand": "npm run build --prefix web",
+    "frontendDist": "../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Quiz Buzzer",
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' http://127.0.0.1:*; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; media-src 'self' http://127.0.0.1:*; img-src 'self' data: http://127.0.0.1:*; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": { "active": true, "targets": "all" }
+}
+```
+
+Do **not** use `frontendDist` as the webview URL. The window must load Axum. In `lib.rs` setup, ignore bundled assets for navigation:
+
+```rust
+.invoke_handler(tauri::generate_handler![])
+.setup(|app| {
+    let port: u16 = std::env::var("QUIZ_BUZZER_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(7423);
+    let key = random_hex_16();
+    let static_dir = std::env::current_dir().unwrap().join("web/dist");
+    tauri::async_runtime::spawn(async move {
+        let _ = quiz_buzzer_core::start_server(quiz_buzzer_core::ServerConfig {
+            port,
+            host_key: key.clone(),
+            static_dir,
+        }).await;
+    });
+    let window = app.get_webview_window("main").unwrap();
+    let url = format!("http://127.0.0.1:{port}/board?k={key}");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let _ = window.navigate(url.parse().unwrap());
+    Ok(())
+})
+```
+
+Sleeping 200ms is racy. **Better:** `start_server` returns after bind, or bind in setup then spawn serve:
+
+```rust
+let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+let bound = listener.local_addr().unwrap();
+// spawn axum::serve(listener, app)
+// navigate to bound.port()
+```
+
+Change `start_server` to `pub async fn bind_server(config) -> io::Result<(impl Future, u16, String)>` or split `bind` / `serve`.
+
+Implement `pub async fn bind_and_serve(config) -> io::Result<()>` plus `pub async fn bind(config) -> io::Result<(TcpListener, Router, u16)>` used by Tauri.
+
+Tauri setup **must** wait until bind succeeds, then navigate. Pass `host_key` into the URL.
+
+`src-tauri/Cargo.toml` depends on `quiz-buzzer-core = { path = "../crates/core" }` and `tauri = { version = "2", features = [] }`.
+
+Capabilities: allow `core:webview:allow-navigate` and HTTP loopback.
+
+- [ ] **Step 3: `src-tauri/src/main.rs`**
+
+```rust
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+fn main() {
+    quiz_buzzer_lib::run();
+}
+```
+
+Crate name in `src-tauri/Cargo.toml`: `name = "quiz-buzzer"` with `[lib] name = "quiz_buzzer_lib" crate-type = ["lib", "cdylib", "staticlib"]`.
+
+- [ ] **Step 4: Run**
+
+```bash
+npm install
+npm run build:ui
+cargo tauri dev
+```
+
+Expected: a window showing the board (or “invalid host key” if navigate raced — fix bind-first). Phones on LAN load `http://<ip>:7423/`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src-tauri package.json Cargo.toml
+git commit -m "feat: Tauri host opens board against local Axum"
+```
+
+---
+
+### Task 16: Operator README and failure copy
+
+**Files:**
+- Modify: `README.md`
+- Modify: `web/src/board.ts` (if zero players connected, show “Phones must use the same Wi‑Fi, not Guest”)
+
+- [ ] **Step 1: Expand README**
+
+Include:
+
+- Requirements: same Wi‑Fi, disable client isolation, allow firewall
+- `npm install` / `npm run build:ui` / `cargo tauri dev`
+- Default port 7423, `QUIZ_BUZZER_PORT`
+- Clicker is the small QR labeled Host clicker
+- Players: open big QR, type name, tap on pointer down
+- ARM starts a round; RESET freezes the list
+- Not for remote play
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add README.md web/src/board.ts
+git commit -m "docs: LAN operator notes and guest-Wi-Fi warning"
+```
+
+---
+
+### Task 17: Manual LAN verification (required before calling done)
+
+Do this on real devices, not only `cargo test`.
+
+- [ ] **Step 1: Two phones + laptop, same SSID**
+
+1. Launch Tauri. Board shows URL + QR.
+2. Phone A and B join with names.
+3. Clicker ARM (or if clicker not ready, use a third hello — must use clicker).
+4. Both tap. Board: first name huge, list ordered, sound once.
+5. Phones show `1st` / `2nd`.
+6. RESET: buzzer says Wait; list remains.
+7. ARM: list clears; phones back to BUZZ.
+8. Toggle mute; first buzz silent then unmuted.
+9. Airplane mode phone A: board `connected: false`; reconnect: same name/id.
+10. Confirm `click` is not required (tap on down).
+
+If guest Wi‑Fi was tested and failed, that matches the spec; use the main SSID.
+
+---
+
+## Self-review
+
+**Spec coverage**
+
+| Spec item | Task |
+|---|---|
+| Server arrival order / actor | 5, 7 |
+| Arm clears, reset freezes | 4 |
+| Hello, reconnect, names, room full | 3 |
+| Host key | 4, 9, 15 |
+| JSON protocol camelCase | 6, 10 |
+| LAN IPs | 8, 12 |
+| Player pointerdown + place | 11 |
+| Board sound + QR | 12 |
+| Clicker | 13 |
+| Axum static + WS | 9, 14 |
+| Tauri window loopback | 15 |
+| No Cloudflare / no scoring | entire plan omits them |
+| Operator isolation warning | 16 |
+| Manual device test | 17 |
+
+**Types:** `PlayerId = Uuid`, `ClientRole`, `BuzzResult`, `ServerMessage` / `ClientMessage` names are identical in later tasks.
+
+**Placeholders:** none remaining. Audio file is generated in Task 12. `getrandom` / `if-addrs` versions must be the current crates.io API at implementation time — if a function name shifted, keep behavior (16 random bytes hex; list IPv4).

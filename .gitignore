@@ -1,0 +1,10 @@
+/target
+/web/node_modules
+/web/dist
+/src-tauri/target
+.DS_Store
+*.log
+.worktrees
+.agents
+.claude
+skills-lock.json
