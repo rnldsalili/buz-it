@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,11 +29,13 @@ pub fn run() {
                 }
             });
 
-            let window = app
-                .get_webview_window("main")
-                .ok_or("missing webview window 'main'")?;
-            let url = format!("http://127.0.0.1:{port}/board?k={host_key}");
-            navigate_to_board(&window, &url);
+            let url = format!("http://127.0.0.1:{port}/board?k={host_key}")
+                .parse()
+                .map_err(|e| format!("invalid board URL: {e}"))?;
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+                .title("Quiz Buzzer")
+                .inner_size(1280.0, 720.0)
+                .build()?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -52,13 +54,4 @@ fn resolve_static_dir() -> PathBuf {
         return from_manifest;
     }
     from_cwd
-}
-
-fn navigate_to_board(window: &tauri::WebviewWindow, url: &str) {
-    if let Ok(parsed) = url.parse() {
-        if window.navigate(parsed).is_ok() {
-            return;
-        }
-    }
-    let _ = window.eval(&format!("window.location.replace({url:?})"));
 }
