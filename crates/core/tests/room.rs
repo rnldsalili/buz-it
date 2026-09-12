@@ -63,3 +63,24 @@ fn duplicate_names_allowed() {
     room.hello_player(None, "Asha").unwrap();
     assert_eq!(room.snapshot().players.len(), 2);
 }
+
+#[test]
+fn hello_player_frees_slot_when_disconnected() {
+    let mut room = Room::new("k");
+    let mut ids = Vec::new();
+    for i in 0..MAX_PLAYERS {
+        ids.push(room.hello_player(None, &format!("p{i}")).unwrap().id);
+    }
+    assert_eq!(room.hello_player(None, "overflow").unwrap_err(), HelloError::RoomFull);
+
+    room.disconnect(ids[0]);
+    let joined = room.hello_player(None, "newbie").unwrap();
+    assert_eq!(joined.name, "newbie");
+    assert!(joined.connected);
+
+    // Room is full of connected players again; resume of an existing id still works.
+    let resumed = room.hello_player(Some(ids[1]), "renamed").unwrap();
+    assert_eq!(resumed.id, ids[1]);
+    assert_eq!(resumed.name, "renamed");
+    assert!(resumed.connected);
+}

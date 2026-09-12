@@ -117,12 +117,12 @@ impl Room {
         let name = normalize_name(name)?;
         if let Some(id) = resume {
             if let Some(existing) = self.players.get_mut(&id) {
-                existing.name = name.clone();
+                existing.name = name;
                 existing.connected = true;
                 return Ok(existing.clone());
             }
         }
-        if self.players.len() >= MAX_PLAYERS {
+        if self.players.values().filter(|p| p.connected).count() >= MAX_PLAYERS {
             return Err(HelloError::RoomFull);
         }
         let player = Player {
